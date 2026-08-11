@@ -23,6 +23,14 @@ table_context:
   acceptance_score: 4.5
   ambiguity_margin: 0.6
   max_boundary_overlap_page_ratio: 0.008
+  # Caption continuations are linked to a strong caption seed, never inferred
+  # from table proximity alone. Gap checks combine page and local line scales.
+  fragment_max_gap_page_ratio: 0.018
+  fragment_max_line_gap_ratio: 1.8
+  fragment_min_horizontal_overlap: 0.30
+  fragment_edge_alignment_page_ratio: 0.025
+  fragment_acceptance_score: 4.5
+  fragment_ambiguity_margin: 0.75
 caption_overlap:
   enabled: true
   # Conservative defaults: only near-identical boxes are collapsed.

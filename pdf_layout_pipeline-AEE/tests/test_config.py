@@ -29,6 +29,17 @@ def test_invalid_table_context_ratio():
         ).validate()
 
 
+def test_invalid_caption_fragment_controls():
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            table_context=TableContextConfig(fragment_min_horizontal_overlap=1.1)
+        ).validate()
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            table_context=TableContextConfig(fragment_max_line_gap_ratio=-0.1)
+        ).validate()
+
+
 def test_invalid_generalized_overlap_ratio():
     with pytest.raises(ValueError):
         PipelineConfig(
