@@ -22,3 +22,13 @@ table_context:
   min_horizontal_overlap_ratio: 0.18
   acceptance_score: 4.5
   ambiguity_margin: 0.6
+  max_boundary_overlap_page_ratio: 0.008
+caption_overlap:
+  enabled: true
+  # Conservative defaults: only near-identical boxes are collapsed.
+  duplicate_iou: 0.90
+  duplicate_edge_page_ratio: 0.003
+  duplicate_area_ratio: 0.85
+  nested_containment: 0.92
+  fragment_max_gap_page_ratio: 0.012
+  boundary_overlap_page_ratio: 0.008

@@ -109,6 +109,20 @@ class TableContextConfig:
     min_horizontal_overlap_ratio: float = 0.18
     acceptance_score: float = 4.5
     ambiguity_margin: float = 0.6
+    max_boundary_overlap_page_ratio: float = 0.008
+
+
+@dataclass(frozen=True)
+class CaptionOverlapConfig:
+    """Conservative, publisher-independent caption relationship controls."""
+
+    enabled: bool = True
+    duplicate_iou: float = 0.90
+    duplicate_edge_page_ratio: float = 0.003
+    duplicate_area_ratio: float = 0.85
+    nested_containment: float = 0.92
+    fragment_max_gap_page_ratio: float = 0.012
+    boundary_overlap_page_ratio: float = 0.008
 
 
 @dataclass(frozen=True)
@@ -130,6 +144,7 @@ class PipelineConfig:
     tail: TailFilterConfig = field(default_factory=TailFilterConfig)
     reading_order: ReadingOrderConfig = field(default_factory=ReadingOrderConfig)
     table_context: TableContextConfig = field(default_factory=TableContextConfig)
+    caption_overlap: CaptionOverlapConfig = field(default_factory=CaptionOverlapConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
 
@@ -226,3 +241,16 @@ class PipelineConfig:
             raise ValueError("table context acceptance score must be non-negative")
         if self.table_context.ambiguity_margin < 0:
             raise ValueError("table context ambiguity margin must be non-negative")
+        if not 0 <= self.table_context.max_boundary_overlap_page_ratio <= 1:
+            raise ValueError("table context boundary overlap ratio must be in [0, 1]")
+        overlap = self.caption_overlap
+        for name in ("duplicate_iou", "duplicate_area_ratio", "nested_containment"):
+            if not 0 <= getattr(overlap, name) <= 1:
+                raise ValueError(f"caption overlap {name} must be in [0, 1]")
+        for name in (
+            "duplicate_edge_page_ratio",
+            "fragment_max_gap_page_ratio",
+            "boundary_overlap_page_ratio",
+        ):
+            if getattr(overlap, name) < 0:
+                raise ValueError(f"caption overlap {name} must be non-negative")

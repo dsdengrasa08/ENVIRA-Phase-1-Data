@@ -106,6 +106,16 @@ def test_side_by_side_tables_use_exclusive_candidate_ownership():
     assert groups[1]["identifier_region_ids"] == ["right-caption"]
 
 
+def test_slight_caption_table_boundary_overlap_is_associated_without_bbox_change():
+    caption = region("caption", "Caption", [100, 100, 700, 205], "Table 3. Results", 1)
+    table = region("table", "Table", [100, 200, 700, 500], order=2)
+    group = associate([caption, table])[0]
+    assert group["identifier_region_ids"] == ["caption"]
+    assert group["caption_region_ids"] == ["caption"]
+    assert group["table_bbox"] == [100, 200, 700, 500]
+    assert group["associations"][0]["features"]["boundary_overlap_page_ratio"] > 0
+
+
 def test_table_label_variants_are_supporting_metadata():
     labels = ["TABLE IV. Roman", "Table B.3 Appendix", "Extended Data Table 2 Results"]
     for index, label in enumerate(labels):

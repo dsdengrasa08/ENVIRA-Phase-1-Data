@@ -25,6 +25,10 @@ class ArtifactPaths:
     post_body_assets_jsonl: Path
     post_body_asset_regions_jsonl: Path
     logical_tables_jsonl: Path
+    raw_regions_jsonl: Path
+    resolved_regions_jsonl: Path
+    caption_relationships_jsonl: Path
+    caption_groups_jsonl: Path
     summary_csv: Path
 
 
@@ -92,6 +96,9 @@ class PipelineResult:
     raw_document: dict[str, Any]
     raw_markdown: str = ""
     logical_tables: list[dict[str, Any]] = field(default_factory=list)
+    resolved_regions: list[LayoutRegion] = field(default_factory=list)
+    caption_overlap_relationships: list[dict[str, Any]] = field(default_factory=list)
+    caption_groups: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

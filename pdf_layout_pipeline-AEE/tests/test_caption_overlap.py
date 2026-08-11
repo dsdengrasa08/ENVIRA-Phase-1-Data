@@ -1,0 +1,129 @@
+from copy import deepcopy
+
+from envira_pdf_layout.caption_overlap import (
+    build_caption_groups,
+    overlap_features,
+    resolve_caption_overlaps,
+)
+
+PAGES = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
+
+
+def region(region_id, typ, bbox, text="", order=1, score=None):
+    return {
+        "layout_region_id": region_id,
+        "page_number": 1,
+        "type": typ,
+        "docling_label": typ.lower(),
+        "bbox_px": bbox,
+        "text": text,
+        "layout_reading_order": order,
+        "score": score,
+    }
+
+
+def test_overlap_features_distinguish_iou_and_directional_containment():
+    small = region("small", "Caption", [100, 100, 200, 130], "Table 1")
+    large = region("large", "Caption", [90, 90, 700, 180], "Table 1. Results")
+    features = overlap_features(small, large, PAGES[0])
+    assert features["a_containment"] == 1.0
+    assert features["b_containment"] < 0.1
+    assert features["iou"] < 0.1
+    assert features["text_relation"] == "a_in_b"
+
+
+def test_clear_duplicate_collapses_without_mutating_raw_regions():
+    raw = [
+        region("a", "Caption", [100, 100, 700, 150], "Table 1. Results", score=0.8),
+        region("b", "Caption", [101, 100, 699, 151], "Table 1. Results", score=0.9),
+    ]
+    before = deepcopy(raw)
+    resolved, relationships, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert raw == before
+    assert [r["layout_region_id"] for r in resolved] == ["b"]
+    assert resolved[0]["source_region_ids"] == ["b", "a"]
+    assert [r["layout_region_id"] for r in suppressed] == ["a"]
+    assert relationships[0]["kind"] == "DUPLICATE"
+    assert relationships[0]["status"] == "collapsed"
+
+
+def test_nested_identifier_is_preserved_not_suppressed():
+    raw = [
+        region("id", "Caption", [100, 100, 220, 130], "Table S7"),
+        region("caption", "Caption", [90, 90, 700, 180], "Table S7. Outcomes by group"),
+    ]
+    resolved, relationships, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert {r["layout_region_id"] for r in resolved} == {"id", "caption"}
+    assert suppressed == []
+    assert relationships[0]["kind"] == "NESTED_COMPONENT"
+
+
+def test_overlapping_unique_caption_fragments_are_grouped_not_suppressed():
+    raw = [
+        region("first", "Caption", [100, 100, 700, 145], "Table 4. First line", 1),
+        region("second", "Caption", [100, 140, 700, 190], "continued measurements", 2),
+    ]
+    resolved, relationships, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert len(resolved) == 2
+    assert suppressed == []
+    assert relationships[0]["kind"] == "COMPLEMENTARY_FRAGMENT"
+
+
+def test_context_group_preserves_identifier_and_deduplicates_emission_membership():
+    regions = [
+        region("id", "Caption", [100, 100, 220, 130], "Table 2", 1),
+        region("caption", "Caption", [90, 90, 700, 180], "Table 2. Values", 2),
+        region("table", "Table", [90, 185, 700, 500], order=3),
+    ]
+    resolved, relationships, _ = resolve_caption_overlaps(regions, PAGES)
+    logical = [
+        {
+            "internal_id": "doc:p0001:t01",
+            "page_number": 1,
+            "table_region_id": "table",
+            "identifier_region_ids": ["id", "caption"],
+            "caption_region_ids": ["caption"],
+        }
+    ]
+    group = build_caption_groups(resolved, logical, relationships, PAGES)[0]
+    assert group["ordered_source_region_ids"] == ["id", "caption"]
+    assert group["semantic_text_region_ids"] == ["id", "caption"]
+    assert group["relationships"][0]["status"] == "preserved_as_nested_component"
+
+
+def test_context_group_links_caption_fragments_separated_by_small_gap():
+    regions = [
+        region("first", "Caption", [100, 100, 700, 130], "First caption line", 1),
+        region("second", "Caption", [100, 135, 700, 165], "Second caption line", 2),
+        region("table", "Table", [100, 170, 700, 500], order=3),
+    ]
+    resolved, relationships, _ = resolve_caption_overlaps(regions, PAGES)
+    logical = [
+        {
+            "internal_id": "doc:p0001:t01",
+            "page_number": 1,
+            "table_region_id": "table",
+            "identifier_region_ids": [],
+            "caption_region_ids": ["first", "second"],
+        }
+    ]
+    group = build_caption_groups(resolved, logical, relationships, PAGES)[0]
+    assert group["relationships"][0]["kind"] == "COMPLEMENTARY_FRAGMENT"
+    assert group["relationships"][0]["status"] == "grouped"
+
+
+def test_caption_table_overlap_is_recorded_without_geometry_changes():
+    raw = [
+        region("caption", "Caption", [100, 100, 700, 205], "Results", 1),
+        region("table", "Table", [100, 200, 700, 500], order=2),
+    ]
+    before = deepcopy(raw)
+    resolved, relationships, _ = resolve_caption_overlaps(raw, PAGES)
+    assert raw == before
+    assert next(r for r in resolved if r["type"] == "Table")["bbox_px"] == [
+        100,
+        200,
+        700,
+        500,
+    ]
+    assert relationships[0]["kind"] == "CROSS_ROLE_BOUNDARY_OVERLAP"
