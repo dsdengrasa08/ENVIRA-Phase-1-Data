@@ -73,9 +73,10 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
 
 
 def render_layout_overlays(run, save=True):
+    """Render the consumer-facing resolved layout with one box per caption group."""
     return [
         render_layout_overlay(
-            page,
+            _page_with_regions(page, _semantic_display_regions(run, page)),
             (
                 run.document.artifacts.overlay_dir
                 / f"page_{page['page_number']:04d}_docling_layout_overlay.png"
@@ -93,6 +94,66 @@ def _page_with_regions(page, regions, key="layout_regions"):
     value[key] = [r for r in regions if int(r["page_number"]) == page_number]
     value.pop("asset_aware_overlay_regions", None)
     return value
+
+
+def _semantic_display_regions(run, page):
+    """Return resolved regions with caption members replaced by one logical box."""
+    page_number = int(page["page_number"])
+    groups = [
+        group
+        for group in run.caption_groups
+        if int(group["page_number"]) == page_number
+    ]
+    grouped_ids = {
+        str(region_id)
+        for group in groups
+        for region_id in group["ordered_source_region_ids"]
+    }
+    regions = [
+        dict(region)
+        for region in run.resolved_regions
+        if int(region["page_number"]) == page_number
+        and str(region["layout_region_id"]) not in grouped_ids
+        and region.get("emission_policy") != "suppress_duplicate_text_emission"
+    ]
+    by_id = {str(region["layout_region_id"]): region for region in run.resolved_regions}
+    for group in groups:
+        members = [
+            by_id[str(region_id)]
+            for region_id in group["ordered_source_region_ids"]
+            if str(region_id) in by_id
+        ]
+        if not members:
+            continue
+        boxes = [list(map(float, member["bbox_px"])) for member in members]
+        regions.append(
+            {
+                "layout_region_id": group["resolved_region_id"],
+                "page_number": page_number,
+                "type": "Caption",
+                "text": group.get("text", ""),
+                "bbox_px": [
+                    min(box[0] for box in boxes),
+                    min(box[1] for box in boxes),
+                    max(box[2] for box in boxes),
+                    max(box[3] for box in boxes),
+                ],
+                "visual_overlay_order": min(
+                    int(member.get("resolved_reading_order") or 10**9)
+                    for member in members
+                ),
+                "source_region_ids": group["source_region_ids"],
+                "resolution_action": "semantic_caption_group",
+            }
+        )
+    return sorted(
+        regions,
+        key=lambda region: (
+            int(region.get("visual_overlay_order") or 10**9),
+            float(region["bbox_px"][1]),
+            float(region["bbox_px"][0]),
+        ),
+    )
 
 
 def render_raw_detection_overlays(run, save=True):
