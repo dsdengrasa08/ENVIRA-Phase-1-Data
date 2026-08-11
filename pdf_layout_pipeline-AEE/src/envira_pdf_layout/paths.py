@@ -67,6 +67,9 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         caption_relationships_jsonl=document_dir
         / "caption_overlap_relationships.jsonl",
         caption_groups_jsonl=document_dir / "caption_groups.jsonl",
+        layout_relationships_jsonl=document_dir / "layout_relationships.jsonl",
+        resolution_decisions_jsonl=document_dir / "resolution_decisions.jsonl",
+        suppressed_regions_jsonl=document_dir / "suppressed_layout_regions.jsonl",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (

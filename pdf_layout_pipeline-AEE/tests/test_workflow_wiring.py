@@ -24,3 +24,8 @@ def test_workflow_displays_resolved_caption_outputs():
     assert "semantic_captions_dataframe" in source
     assert "render_resolved_layout_overlays" in source
     assert "render_caption_overlap_overlay" in source
+    assert "layout_relationships_dataframe" in source
+    assert "resolution_decisions_dataframe" in source
+    assert "suppressed_regions_dataframe" in source
+    assert "render_overlap_resolution_overlay" in source
+    assert "overlap_resolution_diagnostics" in source

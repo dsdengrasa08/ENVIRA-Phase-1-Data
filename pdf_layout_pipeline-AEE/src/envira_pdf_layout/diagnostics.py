@@ -63,3 +63,13 @@ def caption_overlap_diagnostics(run, page_number=None):
         if page_number is None or relationship["page_number"] == page_number
     ]
     return pd.DataFrame(rows)
+
+
+def overlap_resolution_diagnostics(run, page_number=None):
+    """Return the complete class-aware relationship graph for inspection."""
+    rows = [
+        relationship
+        for relationship in run.layout_relationships
+        if page_number is None or relationship["page_number"] == page_number
+    ]
+    return pd.DataFrame(rows)

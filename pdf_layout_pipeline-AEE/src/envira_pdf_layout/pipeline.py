@@ -5,7 +5,10 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from .authoritative import run_authoritative_pipeline
-from .caption_overlap import build_caption_groups, resolve_caption_overlaps
+from copy import deepcopy
+
+from .caption_overlap import build_caption_groups
+from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
 from .table_context import associate_table_context
 
 
@@ -26,19 +29,49 @@ def run_layout_pipeline(conversion, page_set, config):
         ),
         "nms_configuration": "not_exposed_by_pipeline",
     }
-    (
-        result.resolved_regions,
-        result.caption_overlap_relationships,
-        suppressed_duplicates,
-    ) = resolve_caption_overlaps(
-        result.final_regions, result.pages, config.caption_overlap
+    resolution_input = list(result.final_regions)
+    if config.overlap_resolution.preserve_authoritative_nested_regions:
+        existing_ids = {str(region["layout_region_id"]) for region in resolution_input}
+        for excluded in result.excluded_by_stage.get("nested_assets", []):
+            region_id = str(excluded.get("layout_region_id"))
+            if not region_id or region_id in existing_ids:
+                continue
+            recovered = deepcopy(excluded)
+            recovered["authoritative_filter_disposition"] = "recovered_for_hierarchy"
+            recovered["emission_policy"] = "emit_as_nested_child"
+            resolution_input.append(recovered)
+            existing_ids.add(region_id)
+    resolution = resolve_layout_overlaps(
+        resolution_input, result.pages, config.overlap_resolution
     )
+    result.resolved_regions = resolution.regions
+    result.layout_relationships = list(resolution.relationships)
+    # Backward-compatible name used by notebook caption inspection.  The value
+    # now contains the complete geometric, class-aware relationship graph.
+    result.caption_overlap_relationships = list(resolution.relationships)
+    result.resolution_decisions = resolution.decisions
+    result.suppressed_regions = resolution.suppressed
+    semantic_associations = associate_attachable_context(
+        result.resolved_regions, result.pages
+    )
+    result.layout_relationships.extend(semantic_associations)
     result.diagnostics["caption_overlap"] = {
         "relationship_count": len(result.caption_overlap_relationships),
         "suppressed_duplicate_region_ids": [
-            region["layout_region_id"] for region in suppressed_duplicates
+            region["layout_region_id"] for region in resolution.suppressed
         ],
         "relationships": result.caption_overlap_relationships,
+    }
+    result.diagnostics["overlap_resolution"] = {
+        "relationship_count": len(result.layout_relationships),
+        "decision_count": len(result.resolution_decisions),
+        "suppressed_region_count": len(result.suppressed_regions),
+        "recovered_nested_region_count": sum(
+            region.get("authoritative_filter_disposition") == "recovered_for_hierarchy"
+            for region in result.resolved_regions
+        ),
+        "relationships": result.layout_relationships,
+        "decisions": result.resolution_decisions,
     }
     if config.table_context.enabled:
         result.logical_tables = associate_table_context(
