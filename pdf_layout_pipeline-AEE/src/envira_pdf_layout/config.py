@@ -129,6 +129,25 @@ class CaptionOverlapConfig:
 
 
 @dataclass(frozen=True)
+class OverlapResolutionConfig:
+    """Class-aware controls for the generalized relationship graph.
+
+    Destructive actions intentionally use stricter thresholds than relationship
+    observation.  Values are page-relative where their names end in ``ratio``.
+    """
+
+    enabled: bool = True
+    duplicate_iou: float = 0.90
+    duplicate_edge_page_ratio: float = 0.003
+    duplicate_area_ratio: float = 0.85
+    nested_containment: float = 0.92
+    fragment_horizontal_overlap: float = 0.50
+    fragment_max_gap_page_ratio: float = 0.012
+    boundary_overlap_ratio: float = 0.20
+    preserve_authoritative_nested_regions: bool = True
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     write_raw: bool = True
     write_regions: bool = True
@@ -148,6 +167,9 @@ class PipelineConfig:
     reading_order: ReadingOrderConfig = field(default_factory=ReadingOrderConfig)
     table_context: TableContextConfig = field(default_factory=TableContextConfig)
     caption_overlap: CaptionOverlapConfig = field(default_factory=CaptionOverlapConfig)
+    overlap_resolution: OverlapResolutionConfig = field(
+        default_factory=OverlapResolutionConfig
+    )
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
 
@@ -262,3 +284,16 @@ class PipelineConfig:
         ):
             if getattr(overlap, name) < 0:
                 raise ValueError(f"caption overlap {name} must be non-negative")
+        generalized = self.overlap_resolution
+        for name in (
+            "duplicate_iou",
+            "duplicate_area_ratio",
+            "nested_containment",
+            "fragment_horizontal_overlap",
+            "boundary_overlap_ratio",
+        ):
+            if not 0 <= getattr(generalized, name) <= 1:
+                raise ValueError(f"overlap resolution {name} must be in [0, 1]")
+        for name in ("duplicate_edge_page_ratio", "fragment_max_gap_page_ratio"):
+            if getattr(generalized, name) < 0:
+                raise ValueError(f"overlap resolution {name} must be non-negative")

@@ -46,6 +46,35 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   table body with optional identifier, caption, note, footnote, and source regions.
 - `caption_overlap.py`: conservative caption-overlap analysis, clear-duplicate
   resolution, and provenance-preserving semantic caption groups.
+- `layout_overlap.py`: generalized class-family relationship graph, immutable
+  source/resolved geometry, complete-link duplicate canonicalization,
+  hierarchy/conflict/fragment analysis, and attachable-parent association.
+
+## Generalized overlap resolution
+
+The maintained pipeline now resolves overlaps after the authoritative filters and
+before semantic context grouping. Regions removed by the authoritative nested-
+asset filter are conservatively restored to the relationship layer as nested
+children, so their text and geometry remain auditable without forcing them into
+the top-level reading stream.
+
+Resolution is deliberately split into observation, classification, and action:
+
+1. page-local sweep-line candidate generation;
+2. directional geometry, text, class-family, and alignment features;
+3. duplicate, containment, class-conflict, accidental-intersection,
+   fragmentation, invalid-occlusion, and ambiguity relationships;
+4. complete-link duplicate canonicalization (preventing transitive drift);
+5. parent-local ordering for nested children and final top-level order;
+6. non-destructive caption association to tables, figures, equations/formulas,
+   and future attachable asset classes.
+
+Every resolved region retains `source_bbox_px`, `resolved_bbox_px`,
+`source_region_ids`, an emission policy, and resolution status. Generalized
+relationships, action decisions, and suppressed source detections are exported
+as separate JSONL artifacts. The workflow provides a resolution overlay showing
+source geometry, resolved geometry, suppressed detections, hierarchy arrows, and
+unresolved conflicts.
 
 ## Logical table context
 

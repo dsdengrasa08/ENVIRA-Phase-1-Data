@@ -28,6 +28,21 @@ def resolved_regions_dataframe(run):
     return pd.DataFrame(run.resolved_regions)
 
 
+def layout_relationships_dataframe(run):
+    """Return every generalized duplicate, hierarchy, conflict, and association edge."""
+    return pd.DataFrame(run.layout_relationships)
+
+
+def resolution_decisions_dataframe(run):
+    """Return auditable actions separately from pairwise observations."""
+    return pd.DataFrame(run.resolution_decisions)
+
+
+def suppressed_regions_dataframe(run):
+    """Return source detections omitted from the canonical physical view."""
+    return pd.DataFrame(run.suppressed_regions)
+
+
 def caption_groups_dataframe(run):
     return pd.DataFrame(run.caption_groups)
 

@@ -29,6 +29,9 @@ class ArtifactPaths:
     resolved_regions_jsonl: Path
     caption_relationships_jsonl: Path
     caption_groups_jsonl: Path
+    layout_relationships_jsonl: Path
+    resolution_decisions_jsonl: Path
+    suppressed_regions_jsonl: Path
     summary_csv: Path
 
 
@@ -99,6 +102,9 @@ class PipelineResult:
     resolved_regions: list[LayoutRegion] = field(default_factory=list)
     caption_overlap_relationships: list[dict[str, Any]] = field(default_factory=list)
     caption_groups: list[dict[str, Any]] = field(default_factory=list)
+    layout_relationships: list[dict[str, Any]] = field(default_factory=list)
+    resolution_decisions: list[dict[str, Any]] = field(default_factory=list)
+    suppressed_regions: list[LayoutRegion] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -48,3 +48,29 @@ def test_semantic_display_replaces_caption_members_with_one_group_box():
     ]
     assert regions[0]["bbox_px"] == [10.0, 10.0, 300.0, 70.0]
     assert regions[0]["text"] == "Table 3. Stalk yield"
+
+
+def test_semantic_display_hides_nested_children_but_physical_view_retains_them():
+    run = SimpleNamespace(
+        resolved_regions=[
+            {
+                "layout_region_id": "figure",
+                "page_number": 1,
+                "type": "Figure",
+                "bbox_px": [10, 10, 300, 300],
+                "resolved_reading_order": 1,
+                "emission_policy": "emit_canonical",
+            },
+            {
+                "layout_region_id": "panel-label",
+                "page_number": 1,
+                "type": "Text",
+                "bbox_px": [20, 20, 40, 40],
+                "resolved_reading_order": None,
+                "emission_policy": "emit_as_nested_child",
+            },
+        ],
+        caption_groups=[],
+    )
+    assert [r["layout_region_id"] for r in _semantic_display_regions(run, {"page_number": 1})] == ["figure"]
+    assert len(run.resolved_regions) == 2

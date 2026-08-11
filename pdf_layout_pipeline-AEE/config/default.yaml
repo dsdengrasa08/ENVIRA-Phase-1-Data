@@ -33,3 +33,15 @@ caption_overlap:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_page_ratio: 0.008
   boundary_overlap_ratio: 0.20
+overlap_resolution:
+  enabled: true
+  # Destructive canonicalization is deliberately high precision. Calibrate
+  # these publisher-independent defaults against a stratified document corpus.
+  duplicate_iou: 0.90
+  duplicate_edge_page_ratio: 0.003
+  duplicate_area_ratio: 0.85
+  nested_containment: 0.92
+  fragment_horizontal_overlap: 0.50
+  fragment_max_gap_page_ratio: 0.012
+  boundary_overlap_ratio: 0.20
+  preserve_authoritative_nested_regions: true

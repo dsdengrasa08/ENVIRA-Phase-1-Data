@@ -1,6 +1,11 @@
 from pathlib import Path
 import pytest
-from envira_pdf_layout.config import DocumentConfig, PipelineConfig, TableContextConfig
+from envira_pdf_layout.config import (
+    DocumentConfig,
+    OverlapResolutionConfig,
+    PipelineConfig,
+    TableContextConfig,
+)
 
 
 def test_env_config(monkeypatch, tmp_path):
@@ -21,4 +26,11 @@ def test_invalid_table_context_ratio():
     with pytest.raises(ValueError):
         PipelineConfig(
             table_context=TableContextConfig(max_vertical_gap_page_ratio=1.1)
+        ).validate()
+
+
+def test_invalid_generalized_overlap_ratio():
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            overlap_resolution=OverlapResolutionConfig(duplicate_iou=1.1)
         ).validate()

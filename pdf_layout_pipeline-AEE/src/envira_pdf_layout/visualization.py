@@ -114,7 +114,8 @@ def _semantic_display_regions(run, page):
         for region in run.resolved_regions
         if int(region["page_number"]) == page_number
         and str(region["layout_region_id"]) not in grouped_ids
-        and region.get("emission_policy") != "suppress_duplicate_text_emission"
+        and region.get("emission_policy")
+        not in {"suppress_duplicate_text_emission", "emit_as_nested_child"}
     ]
     by_id = {str(region["layout_region_id"]): region for region in run.resolved_regions}
     for group in groups:
@@ -291,6 +292,55 @@ def render_caption_overlap_overlay(run, page_number, output_path: Path | None = 
         (24, 36),
         (0, 0, 255),
     )
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
+
+
+def render_overlap_resolution_overlay(run, page_number, output_path: Path | None = None):
+    """Render original/resolved/suppressed geometry and unresolved graph edges."""
+    import cv2
+
+    page = next(page for page in run.pages if page["page_number"] == page_number)
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    resolved = {
+        str(region["layout_region_id"]): region
+        for region in run.resolved_regions
+        if int(region["page_number"]) == page_number
+    }
+    suppressed = {
+        str(region["layout_region_id"]): region
+        for region in run.suppressed_regions
+        if int(region["page_number"]) == page_number
+    }
+    # Thin gray source geometry remains visible beneath the resolved view.
+    for region in resolved.values():
+        source = region.get("source_bbox_px", region["bbox_px"])
+        x0, y0, x1, y1 = int_bbox(tuple(source))
+        cv2.rectangle(image, (x0, y0), (x1, y1), (150, 150, 150), 1, cv2.LINE_AA)
+    for region in resolved.values():
+        x0, y0, x1, y1 = int_bbox(tuple(region.get("resolved_bbox_px", region["bbox_px"])))
+        color = (0, 165, 255) if region.get("resolution_status") == "ambiguous" else (40, 180, 40)
+        cv2.rectangle(image, (x0, y0), (x1, y1), color, 2, cv2.LINE_AA)
+        _label(image, str(region["layout_region_id"]), (x0 + 3, max(18, y0 + 16)), color)
+    for region in suppressed.values():
+        x0, y0, x1, y1 = int_bbox(tuple(region["bbox_px"]))
+        cv2.rectangle(image, (x0, y0), (x1, y1), (80, 80, 220), 1, cv2.LINE_4)
+        cv2.line(image, (x0, y0), (x1, y1), (80, 80, 220), 1)
+    for relationship in run.layout_relationships:
+        if relationship["page_number"] != page_number:
+            continue
+        parent = resolved.get(str(relationship.get("parent_region_id")))
+        child = resolved.get(str(relationship.get("child_region_id")))
+        if parent and child:
+            pb, cb = parent["bbox_px"], child["bbox_px"]
+            p = (int((pb[0] + pb[2]) / 2), int((pb[1] + pb[3]) / 2))
+            c = (int((cb[0] + cb[2]) / 2), int((cb[1] + cb[3]) / 2))
+            cv2.arrowedLine(image, p, c, (220, 120, 20), 1, cv2.LINE_AA, tipLength=0.08)
+    _label(image, f"Overlap resolution | page {page_number}", (24, 36), (0, 0, 255))
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_path), image)
