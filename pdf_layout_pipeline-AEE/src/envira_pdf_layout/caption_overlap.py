@@ -22,6 +22,8 @@ _IDENTIFIER_RE = re.compile(
     re.IGNORECASE,
 )
 _CAPTION_TYPES = {"Caption"}
+_TEXT_LIKE_TYPES = {"Caption", "Text", "Footnote", "Section-header", "Title", "List"}
+_ASSET_TYPES = {"Table", "Figure"}
 
 
 def _text(region: LayoutRegion) -> str:
@@ -30,6 +32,14 @@ def _text(region: LayoutRegion) -> str:
 
 def _normalized_text(region: LayoutRegion) -> str:
     return re.sub(r"\W+", " ", _text(region).casefold()).strip()
+
+
+def _tokens(region: LayoutRegion) -> list[str]:
+    return _normalized_text(region).split()
+
+
+def _caption_like(region: LayoutRegion) -> bool:
+    return _is_caption_candidate(region) or region.get("type") in {"Caption"}
 
 
 def _is_caption_candidate(region: LayoutRegion) -> bool:
@@ -58,6 +68,8 @@ def overlap_features(
     iw = max(0.0, min(ab[2], bb[2]) - max(ab[0], bb[0]))
     ih = max(0.0, min(ab[3], bb[3]) - max(ab[1], bb[1]))
     text_a, text_b = _normalized_text(a), _normalized_text(b)
+    tokens_a, tokens_b = _tokens(a), _tokens(b)
+    set_a, set_b = set(tokens_a), set(tokens_b)
     if text_a and text_b:
         if text_a == text_b:
             text_relation = "equal"
@@ -90,6 +102,18 @@ def overlap_features(
         "area_ratio": (
             min(area_a, area_b) / max(area_a, area_b) if max(area_a, area_b) else 0.0
         ),
+        "a_token_coverage": len(set_a & set_b) / len(set_a) if set_a else 0.0,
+        "b_token_coverage": len(set_a & set_b) / len(set_b) if set_b else 0.0,
+        "token_jaccard": (
+            len(set_a & set_b) / len(set_a | set_b) if set_a | set_b else 0.0
+        ),
+        "center_distance_page_ratio": (
+            (
+                (((ab[0] + ab[2]) - (bb[0] + bb[2])) / (2 * width)) ** 2
+                + (((ab[1] + ab[3]) - (bb[1] + bb[3])) / (2 * height)) ** 2
+            )
+            ** 0.5
+        ),
         "edge_delta_page_ratio": max(
             abs(ab[0] - bb[0]) / width,
             abs(ab[2] - bb[2]) / width,
@@ -102,33 +126,76 @@ def overlap_features(
     }
 
 
+def _compatible_text_roles(a, b) -> bool:
+    """Whether two text boxes can be alternate representations of one object."""
+    types = {a.get("type"), b.get("type")}
+    if len(types) == 1:
+        return True
+    return types <= _TEXT_LIKE_TYPES and (
+        _caption_like(a) or _caption_like(b) or features_text_equivalent(a, b)
+    )
+
+
+def features_text_equivalent(a, b) -> bool:
+    left, right = _normalized_text(a), _normalized_text(b)
+    return bool(left and right and left == right)
+
+
+def _text_representative(a: LayoutRegion, b: LayoutRegion) -> tuple[str, str] | None:
+    """Return ``(covered, representative)`` when one item's text subsumes another."""
+    left, right = _normalized_text(a), _normalized_text(b)
+    if not left or not right:
+        return None
+    left_id, right_id = str(a["layout_region_id"]), str(b["layout_region_id"])
+    if left == right:
+        return None  # Exact alternatives are handled by duplicate canonicalization.
+    if left in right:
+        return left_id, right_id
+    if right in left:
+        return right_id, left_id
+    return None
+
+
 def _relationship(a, b, features, config):
     same_class = a.get("type") == b.get("type")
+    compatible_roles = _compatible_text_roles(a, b)
     duplicate_geometry = (
         features["iou"] >= config.duplicate_iou
         and features["area_ratio"] >= config.duplicate_area_ratio
         and features["edge_delta_page_ratio"] <= config.duplicate_edge_page_ratio
     )
     text_supports_duplicate = features["text_relation"] in {"equal", "unavailable"}
-    if same_class and duplicate_geometry and text_supports_duplicate:
+    if compatible_roles and duplicate_geometry and text_supports_duplicate:
         return "DUPLICATE", "near_identical_extent"
-    if features["intersection_over_smaller"] >= config.nested_containment:
-        return "NESTED_COMPONENT", "directional_containment"
+    # Unique, aligned text fragments take precedence over containment. A long
+    # line box can be geometrically contained in a merged caption while still
+    # contributing text that the merged item does not contain.
     if (
-        same_class
+        compatible_roles
         and features["horizontal_overlap"] >= 0.5
         and features["text_relation"] == "different"
     ):
         return "COMPLEMENTARY_FRAGMENT", "overlapping_unique_text"
-    if {a.get("type"), b.get("type")} & {
-        "Table",
-        "Figure",
-        "Footnote",
-        "Text",
-        "Section-header",
-    }:
-        if a.get("type") != b.get("type"):
-            return "CROSS_ROLE_BOUNDARY_OVERLAP", "different_semantic_classes"
+    if features["intersection_over_smaller"] >= config.nested_containment:
+        return "NESTED_COMPONENT", "directional_containment"
+    types = {a.get("type"), b.get("type")}
+    if types & _ASSET_TYPES and types & _TEXT_LIKE_TYPES:
+        smaller_height = min(
+            float(a["bbox_px"][3] - a["bbox_px"][1]),
+            float(b["bbox_px"][3] - b["bbox_px"][1]),
+        )
+        penetration = min(
+            max(0.0, float(a["bbox_px"][3]) - float(b["bbox_px"][1])),
+            max(0.0, float(b["bbox_px"][3]) - float(a["bbox_px"][1])),
+        )
+        if (
+            smaller_height
+            and penetration / smaller_height <= config.boundary_overlap_ratio
+        ):
+            return "BOUNDARY_TOUCH", "limited_cross_role_penetration"
+        return "CROSS_ROLE_BOUNDARY_OVERLAP", "different_semantic_classes"
+    if not same_class:
+        return "CROSS_ROLE_BOUNDARY_OVERLAP", "different_semantic_classes"
     if features["intersection_area"] > 0:
         return "AMBIGUOUS", "overlap_without_duplicate_evidence"
     return "INDEPENDENT", "no_overlap"
@@ -147,13 +214,11 @@ def resolve_caption_overlaps(
     for region in resolved:
         by_page[int(region["page_number"])].append(region)
     relationships = []
-    duplicate_of: dict[str, str] = {}
+    duplicate_edges: list[tuple[str, str]] = []
     by_id = {str(r["layout_region_id"]): r for r in resolved}
     for page_number, page_regions in by_page.items():
         for index, a in enumerate(page_regions):
             for b in page_regions[index + 1 :]:
-                if not (_is_caption_candidate(a) or _is_caption_candidate(b)):
-                    continue
                 features = overlap_features(
                     a, b, page_map.get(page_number, {"page_number": page_number})
                 )
@@ -175,30 +240,89 @@ def resolve_caption_overlaps(
                     "right_bbox": list(b["bbox_px"]),
                     "status": "analyzed",
                 }
+                if kind == "NESTED_COMPONENT":
+                    a_inside = features["a_containment"] >= features["b_containment"]
+                    relation["parent_region_id"] = str(
+                        b["layout_region_id"] if a_inside else a["layout_region_id"]
+                    )
+                    relation["child_region_id"] = str(
+                        a["layout_region_id"] if a_inside else b["layout_region_id"]
+                    )
+                    relation["status"] = "preserved_as_nested_component"
+                elif kind in {"BOUNDARY_TOUCH", "COMPLEMENTARY_FRAGMENT"}:
+                    relation["status"] = "preserved_for_grouping"
+                representative = _text_representative(a, b)
+                if (
+                    kind != "DUPLICATE"
+                    and representative
+                    and _compatible_text_roles(a, b)
+                ):
+                    covered_id, representative_id = representative
+                    relation["semantic_covered_region_id"] = covered_id
+                    relation["semantic_representative_region_id"] = representative_id
+                    relation["status"] = "preserved_without_duplicate_emission"
                 relationships.append(relation)
                 if kind == "DUPLICATE":
-                    # Prefer available text, then score, then stable source order.
-                    source_order = {
-                        str(region["layout_region_id"]): index
-                        for index, region in enumerate(regions)
-                    }
-
-                    def quality(region):
-                        return (
-                            bool(_text(region)),
-                            float(region.get("score") or 0.0),
-                            -source_order[str(region["layout_region_id"])],
-                        )
-
-                    keep, drop = (a, b) if quality(a) >= quality(b) else (b, a)
-                    keep_id, drop_id = str(keep["layout_region_id"]), str(
-                        drop["layout_region_id"]
+                    duplicate_edges.append(
+                        (str(a["layout_region_id"]), str(b["layout_region_id"]))
                     )
-                    if keep_id not in duplicate_of and drop_id not in duplicate_of:
-                        duplicate_of[drop_id] = keep_id
-                        relation["status"] = "collapsed"
-                        relation["canonical_region_id"] = keep_id
+
+    # Resolve duplicate connected components in one deterministic pass. This
+    # avoids order-dependent A/B/C chains and always points provenance directly
+    # at the final canonical region.
+    parent = {region_id: region_id for region_id in by_id}
+
+    def find(region_id):
+        while parent[region_id] != region_id:
+            parent[region_id] = parent[parent[region_id]]
+            region_id = parent[region_id]
+        return region_id
+
+    def union(left, right):
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for left, right in duplicate_edges:
+        union(left, right)
+    components = defaultdict(list)
+    for region_id in by_id:
+        components[find(region_id)].append(region_id)
+    source_order = {
+        str(region["layout_region_id"]): index for index, region in enumerate(regions)
+    }
+
+    def quality(region_id):
+        region = by_id[region_id]
+        return (
+            bool(_text(region)),
+            len(_normalized_text(region)),
+            float(region.get("score") or 0.0),
+            -source_order[region_id],
+        )
+
+    duplicate_of: dict[str, str] = {}
+    for members in components.values():
+        if len(members) < 2:
+            continue
+        canonical = max(members, key=quality)
+        for member in members:
+            if member != canonical:
+                duplicate_of[member] = canonical
+    for relation in relationships:
+        if relation["kind"] != "DUPLICATE":
+            continue
+        canonical = duplicate_of.get(
+            relation["left_region_id"],
+            duplicate_of.get(relation["right_region_id"], relation["left_region_id"]),
+        )
+        relation["status"] = "collapsed"
+        relation["canonical_region_id"] = canonical
     output = []
+    relations_by_id = defaultdict(list)
+    for relation in relationships:
+        relations_by_id[relation["left_region_id"]].append(relation)
+        relations_by_id[relation["right_region_id"]].append(relation)
     for region in resolved:
         region_id = str(region["layout_region_id"])
         if region_id in duplicate_of:
@@ -210,7 +334,44 @@ def resolve_caption_overlaps(
         region["resolution_action"] = (
             "clear_duplicate_collapsed" if len(sources) > 1 else "preserved"
         )
+        region["emission_policy"] = "emit_canonical"
+        nested_parents = sorted(
+            {
+                relation["parent_region_id"]
+                for relation in relations_by_id[region_id]
+                if relation.get("kind") == "NESTED_COMPONENT"
+                and relation.get("child_region_id") == region_id
+            }
+        )
+        if nested_parents:
+            region["nested_parent_region_ids"] = nested_parents
+            # Preserve the region and its text, but tell flattened consumers that
+            # hierarchy-aware emission is preferable to treating it as a peer.
+            region["emission_policy"] = "emit_as_nested_child"
+        semantic_representatives = sorted(
+            {
+                relation["semantic_representative_region_id"]
+                for relation in relations_by_id[region_id]
+                if relation.get("semantic_covered_region_id") == region_id
+            }
+        )
+        if semantic_representatives:
+            region["semantic_duplicate_of_region_ids"] = semantic_representatives
+            region["emission_policy"] = "suppress_duplicate_text_emission"
         output.append(region)
+    resolved_by_page = defaultdict(list)
+    for region in output:
+        resolved_by_page[int(region["page_number"])].append(region)
+    for page_regions in resolved_by_page.values():
+        page_regions.sort(
+            key=lambda region: (
+                int(region.get("layout_reading_order") or 10**9),
+                float(region["bbox_px"][1]),
+                float(region["bbox_px"][0]),
+            )
+        )
+        for order, region in enumerate(page_regions, 1):
+            region["resolved_reading_order"] = order
     suppressed = [by_id[region_id] for region_id in duplicate_of]
     return output, relationships, suppressed
 
@@ -268,6 +429,54 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 float(by_id[rid]["bbox_px"][0]),
             ),
         )
+        covered_ids = {
+            relation["semantic_covered_region_id"]
+            for relation in group_relations
+            if relation.get("semantic_covered_region_id") in member_ids
+            and relation.get("semantic_representative_region_id") in member_ids
+        }
+        for left_index, left_id in enumerate(ordered):
+            left_text = _normalized_text(by_id[left_id])
+            if not left_text:
+                continue
+            for right_id in ordered[left_index + 1 :]:
+                right_text = _normalized_text(by_id[right_id])
+                if not right_text:
+                    continue
+                if left_text == right_text:
+                    covered_ids.add(right_id)
+                elif left_text in right_text:
+                    covered_ids.add(left_id)
+                elif right_text in left_text:
+                    covered_ids.add(right_id)
+        semantic_ids = [
+            region_id for region_id in ordered if region_id not in covered_ids
+        ]
+
+        # Create one consumer-facing caption string. Source fragments and their
+        # geometry remain separate, but overlapping boundary tokens are emitted
+        # once (for example, "Table 3" plus "Table 3. Stalk yield ...").
+        semantic_tokens: list[str] = []
+        for region_id in semantic_ids:
+            fragment_tokens = _text(by_id[region_id]).split()
+            if not fragment_tokens:
+                continue
+            normalized_existing = [
+                re.sub(r"\W+", "", t.casefold()) for t in semantic_tokens
+            ]
+            normalized_fragment = [
+                re.sub(r"\W+", "", token.casefold()) for token in fragment_tokens
+            ]
+            max_overlap = min(len(normalized_existing), len(normalized_fragment))
+            overlap = next(
+                (
+                    size
+                    for size in range(max_overlap, 0, -1)
+                    if normalized_existing[-size:] == normalized_fragment[:size]
+                ),
+                0,
+            )
+            semantic_tokens.extend(fragment_tokens[overlap:])
         # A region listed as both identifier and caption emits once.
         groups.append(
             {
@@ -279,7 +488,8 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 "identifier_region_ids": identifier_ids,
                 "caption_fragment_region_ids": caption_ids,
                 "ordered_source_region_ids": ordered,
-                "semantic_text_region_ids": ordered,
+                "semantic_text_region_ids": semantic_ids,
+                "text": " ".join(semantic_tokens).strip(),
                 "source_region_ids": [
                     sid
                     for rid in ordered
