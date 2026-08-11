@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from .config import DoclingConfig
@@ -44,6 +45,21 @@ class DoclingBackend:
         }.items():
             if hasattr(options, key):
                 setattr(options, key, value)
+        if hasattr(options, "enable_remote_services"):
+            options.enable_remote_services = False
+        if config.do_formula_enrichment or config.do_code_enrichment:
+            try:
+                CodeFormulaVlmOptions = getattr(
+                    import_module("docling.datamodel.pipeline_options"),
+                    "CodeFormulaVlmOptions",
+                )
+                options.code_formula_options = CodeFormulaVlmOptions.from_preset(
+                    config.code_formula_preset
+                )
+            except Exception:
+                # Match the reference's version-tolerant behavior: older Docling
+                # releases may not expose the enrichment option class.
+                pass
         if (
             artifact_path
             and config.use_local_artifacts
@@ -51,6 +67,7 @@ class DoclingBackend:
         ):
             options.artifacts_path = artifact_path
         converter = DocumentConverter(
+            allowed_formats=[InputFormat.PDF],
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
         )
         return cls(converter)

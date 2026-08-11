@@ -32,12 +32,13 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `config.py`: immutable grouped run configuration and environment parsing.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
-- `pdf_io.py`, `docling_backend.py`, `region_conversion.py`: input and backend
-  boundary.
-- `filtering/`: independently testable page-1, header, figure, footer, nested
-  asset, side-margin, and document-tail stages.
-- `assets/`: post-body asset retention and full-page table fallback contract.
-- `reading_order.py`: page/column reading order.
+- `pdf_io.py`, `docling_backend.py`: input and backend boundary.
+- `authoritative.py`: fidelity adapter that executes the immutable reference
+  notebook's item conversion, page-1 recovery, filters, asset recovery, and
+  reading-order implementation in an isolated namespace.
+- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: legacy
+  independently testable helpers retained for compatibility; the maintained
+  workflow does not substitute them for the authoritative algorithms.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
