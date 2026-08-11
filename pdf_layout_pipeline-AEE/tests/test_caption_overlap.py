@@ -126,4 +126,54 @@ def test_caption_table_overlap_is_recorded_without_geometry_changes():
         700,
         500,
     ]
-    assert relationships[0]["kind"] == "CROSS_ROLE_BOUNDARY_OVERLAP"
+    assert relationships[0]["kind"] == "BOUNDARY_TOUCH"
+
+
+def test_cross_type_equal_text_duplicate_is_canonicalized():
+    raw = [
+        region("caption", "Caption", [100, 100, 700, 150], "Table 5. Yield"),
+        region("text", "Text", [101, 100, 699, 151], "Table 5. Yield", score=0.9),
+    ]
+    resolved, relationships, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert len(resolved) == 1
+    assert relationships[0]["kind"] == "DUPLICATE"
+    assert len(suppressed) == 1
+
+
+def test_contained_unique_caption_text_is_fragment_not_nested():
+    raw = [
+        region("merged", "Caption", [100, 100, 800, 180], "Table 5. Stalk yield"),
+        region("line", "Text", [110, 140, 790, 175], "observed at three rates"),
+    ]
+    resolved, relationships, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert len(resolved) == 2
+    assert suppressed == []
+    assert relationships[0]["kind"] == "COMPLEMENTARY_FRAGMENT"
+
+
+def test_non_caption_table_note_overlap_is_analyzed():
+    raw = [
+        region("table", "Table", [100, 200, 700, 500]),
+        region("note", "Footnote", [100, 495, 700, 530], "* p < .05"),
+    ]
+    _, relationships, _ = resolve_caption_overlaps(raw, PAGES)
+    assert relationships[0]["kind"] in {
+        "BOUNDARY_TOUCH",
+        "CROSS_ROLE_BOUNDARY_OVERLAP",
+    }
+
+
+def test_duplicate_chain_has_one_canonical_and_contiguous_resolved_order():
+    raw = [
+        region("a", "Caption", [100, 100, 700, 150], "Table 1", order=1),
+        region("b", "Caption", [101, 100, 699, 151], "Table 1", order=2),
+        region("c", "Caption", [102, 100, 698, 152], "Table 1", order=3),
+        region("table", "Table", [100, 160, 700, 500], order=4),
+    ]
+    resolved, _, suppressed = resolve_caption_overlaps(raw, PAGES)
+    assert len(suppressed) == 2
+    assert (
+        len({r["source_region_ids"][0] for r in resolved if r["type"] == "Caption"})
+        == 1
+    )
+    assert [r["resolved_reading_order"] for r in resolved] == [1, 2]

@@ -32,3 +32,4 @@ caption_overlap:
   nested_containment: 0.92
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_page_ratio: 0.008
+  boundary_overlap_ratio: 0.20
