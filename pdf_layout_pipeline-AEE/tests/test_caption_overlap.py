@@ -215,3 +215,35 @@ def test_duplicate_chain_has_one_canonical_and_contiguous_resolved_order():
         == 1
     )
     assert [r["resolved_reading_order"] for r in resolved] == [1, 2]
+
+
+def test_caption_group_exposes_parent_union_and_provenance_children():
+    regions = [
+        region("label", "Caption", [100, 100, 220, 130], "Table 2.", 1),
+        region("description", "Text", [100, 135, 700, 165], "Measured outcomes", 2),
+        region("table", "Table", [100, 170, 700, 500], order=3),
+    ]
+    logical = [
+        {
+            "internal_id": "table-1",
+            "page_number": 1,
+            "table_region_id": "table",
+            "identifier_region_ids": ["label"],
+            "caption_region_ids": ["description"],
+        }
+    ]
+
+    group = build_caption_groups(regions, logical, [], PAGES)[0]
+
+    assert group["type"] == "Table Caption"
+    assert group["bbox_px"] == [100.0, 100.0, 700.0, 165.0]
+    assert group["text"] == "Table 2. Measured outcomes"
+    assert [child["semantic_role"] for child in group["children"]] == [
+        "table_caption_identifier",
+        "table_caption_fragment",
+    ]
+    assert [child["source_type"] for child in group["children"]] == ["Caption", "Text"]
+    assert [child["source_bbox_px"] for child in group["children"]] == [
+        [100, 100, 220, 130],
+        [100, 135, 700, 165],
+    ]

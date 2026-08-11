@@ -87,6 +87,23 @@ and exclusive candidate ownership. Results are available in
 `PipelineResult.logical_tables`, each page's `logical_tables` field, diagnostics,
 the optional table-context overlay, and `logical_tables.jsonl`.
 
+Caption association is seed anchored: a detector `Caption` region or a generalized
+table-label prefix first establishes a caption-to-table candidate. Once that
+association is unambiguous, every horizontally compatible text region physically
+between the caption and table is included in the caption, regardless of whether
+its wording resembles a body paragraph. This corridor rule handles the common
+case where only a short `Table N.` label is classified as a caption and its full
+description is classified as ordinary text. Competing table corridors remain
+unassigned rather than being guessed.
+
+Outside the caption-to-table corridor, a conservative local graph grows across
+aligned, line-adjacent `Text`/`Caption` fragments in reading order. Edge scoring
+combines page- and line-relative gaps, horizontal overlap, left/right alignment,
+column compatibility, detector class, optional typography, lexical continuity,
+and relationships from generalized overlap resolution. Structural blockers,
+paragraph-like prose, competing table assignments, new object prefixes, and
+unresolved overlap conflicts prevent or penalize this out-of-corridor growth.
+
 Printed labels such as ordinary, supplementary, extended-data, Roman-numeral, and
 appendix table identifiers are metadata. Stable internal IDs do not depend on OCR
 success or the presence of a printed number. Cross-page continuation fields are
@@ -120,6 +137,10 @@ Each group also exposes one deduplicated `text` value and the minimal
 `semantic_text_region_ids` needed to produce it; contained identifier/line boxes
 remain in `ordered_source_region_ids` for geometry and provenance but are not read
 again as separate captions.
+The consumer-facing group is typed as `Table Caption`, carries the union bbox, and
+contains ordered child descriptors with derived identifier/fragment roles, source
+types, source boxes, and detector scores. Source detections are not reclassified or
+resized.
 The physical table bbox is never resized. Outputs include raw, authoritative,
 resolved, relationship, caption-group, and logical-table JSONL artifacts. Raw,
 resolved, table-context, and caption-relationship visualization functions remain

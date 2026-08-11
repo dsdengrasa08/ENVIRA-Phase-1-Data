@@ -452,6 +452,19 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
         semantic_ids = [
             region_id for region_id in ordered if region_id not in covered_ids
         ]
+        source_boxes = [
+            list(map(float, by_id[region_id]["bbox_px"])) for region_id in ordered
+        ]
+        union_bbox = (
+            [
+                min(box[0] for box in source_boxes),
+                min(box[1] for box in source_boxes),
+                max(box[2] for box in source_boxes),
+                max(box[3] for box in source_boxes),
+            ]
+            if source_boxes
+            else None
+        )
 
         # Create one consumer-facing caption string. Source fragments and their
         # geometry remain separate, but overlapping boundary tokens are emitted
@@ -485,6 +498,8 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 "parent_table_id": table["internal_id"],
                 "parent_table_region_id": table["table_region_id"],
                 "role": "table_caption",
+                "type": "Table Caption",
+                "bbox_px": union_bbox,
                 "identifier_region_ids": identifier_ids,
                 "caption_fragment_region_ids": caption_ids,
                 "ordered_source_region_ids": ordered,
@@ -494,6 +509,20 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                     sid
                     for rid in ordered
                     for sid in by_id[rid].get("source_region_ids", [rid])
+                ],
+                "children": [
+                    {
+                        "region_id": region_id,
+                        "semantic_role": (
+                            "table_caption_identifier"
+                            if region_id in identifier_ids
+                            else "table_caption_fragment"
+                        ),
+                        "source_type": by_id[region_id].get("type"),
+                        "source_bbox_px": list(by_id[region_id]["bbox_px"]),
+                        "detector_score": by_id[region_id].get("score"),
+                    }
+                    for region_id in ordered
                 ],
                 "relationships": group_relations,
                 "resolution": "context_aware_caption_group",
