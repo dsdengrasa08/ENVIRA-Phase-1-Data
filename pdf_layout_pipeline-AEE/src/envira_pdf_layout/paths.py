@@ -62,6 +62,11 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         post_body_assets_jsonl=document_dir / "post_body_assets.jsonl",
         post_body_asset_regions_jsonl=document_dir / "post_body_asset_regions.jsonl",
         logical_tables_jsonl=document_dir / "logical_tables.jsonl",
+        raw_regions_jsonl=document_dir / "raw_layout_regions.jsonl",
+        resolved_regions_jsonl=document_dir / "resolved_layout_regions.jsonl",
+        caption_relationships_jsonl=document_dir
+        / "caption_overlap_relationships.jsonl",
+        caption_groups_jsonl=document_dir / "caption_groups.jsonl",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (

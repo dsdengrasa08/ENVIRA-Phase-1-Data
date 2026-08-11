@@ -44,6 +44,8 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `pipeline.py`: high-level stage orchestration.
 - `table_context.py`: publisher-independent logical association of each retained
   table body with optional identifier, caption, note, footnote, and source regions.
+- `caption_overlap.py`: conservative caption-overlap analysis, clear-duplicate
+  resolution, and provenance-preserving semantic caption groups.
 
 ## Logical table context
 
@@ -60,6 +62,24 @@ Printed labels such as ordinary, supplementary, extended-data, Roman-numeral, an
 appendix table identifiers are metadata. Stable internal IDs do not depend on OCR
 success or the presence of a printed number. Cross-page continuation fields are
 reserved on each page-local group for a later document-level continuation stage.
+
+## Caption overlap resolution
+
+Caption overlap handling is deliberately separate from physical layout filtering.
+The pipeline preserves `raw_regions` and authoritative `final_regions`, then creates
+`resolved_regions` by collapsing only near-identical, same-class detections with
+compatible text evidence. Nested identifiers, complementary caption fragments,
+caption/table boundary overlaps, and ambiguous pairs remain available. Pairwise
+geometry includes IoU, directional containment, intersection over the smaller
+region, horizontal/vertical overlap, relative area, and normalized edge deltas.
+
+Table-context association runs on the conservatively resolved regions. A subsequent
+context-aware pass creates `caption_groups`, preserving identifier and fragment
+roles, source IDs, relationship evidence, ambiguity status, and parent table IDs.
+The physical table bbox is never resized. Outputs include raw, authoritative,
+resolved, relationship, caption-group, and logical-table JSONL artifacts. Raw,
+resolved, table-context, and caption-relationship visualization functions remain
+separate so model and post-processing behavior can be inspected independently.
 
 ## Output compatibility and validation
 

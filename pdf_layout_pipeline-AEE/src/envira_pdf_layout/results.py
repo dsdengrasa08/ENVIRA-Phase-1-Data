@@ -23,6 +23,15 @@ def regions_dataframe(run):
     return pd.DataFrame(run.final_regions)
 
 
+def resolved_regions_dataframe(run):
+    """Return duplicate-resolved regions without hiding authoritative regions."""
+    return pd.DataFrame(run.resolved_regions)
+
+
+def caption_groups_dataframe(run):
+    return pd.DataFrame(run.caption_groups)
+
+
 def region_type_counts_dataframe(run):
     df = regions_dataframe(run)
     return (

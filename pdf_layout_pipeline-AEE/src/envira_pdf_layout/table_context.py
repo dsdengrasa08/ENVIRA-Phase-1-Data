@@ -61,9 +61,11 @@ def _has_blocker(
     candidate: LayoutRegion, table: LayoutRegion, page_regions: list[LayoutRegion]
 ) -> str | None:
     cb, tb = candidate["bbox_px"], table["bbox_px"]
+    candidate_center = (float(cb[1]) + float(cb[3])) / 2.0
+    table_center = (float(tb[1]) + float(tb[3])) / 2.0
     top, bottom = (
         sorted((float(cb[3]), float(tb[1])))
-        if cb[3] <= tb[1]
+        if candidate_center <= table_center
         else sorted((float(tb[3]), float(cb[1])))
     )
     for region in page_regions:
@@ -90,12 +92,13 @@ def _score_edge(
     config: TableContextConfig,
 ) -> dict[str, Any] | None:
     cb, tb = list(map(float, candidate["bbox_px"])), list(map(float, table["bbox_px"]))
-    above = cb[3] <= tb[1]
-    below = cb[1] >= tb[3]
+    tolerance = config.max_boundary_overlap_page_ratio * page_height
+    above = cb[3] <= tb[1] + tolerance and cb[1] < tb[1]
+    below = cb[1] >= tb[3] - tolerance and cb[3] > tb[3]
     if not (above or below) or candidate.get("type") not in _TEXT_TYPES:
         return None
     gap = (tb[1] - cb[3]) if above else (cb[1] - tb[3])
-    gap_page = gap / page_height
+    gap_page = max(0.0, gap) / page_height
     overlap = _overlap_ratio(cb, tb)
     if gap_page > config.max_vertical_gap_page_ratio:
         return None
@@ -156,6 +159,7 @@ def _score_edge(
         "direction": "above" if above else "below",
         "features": {
             "gap_page_ratio": round(gap_page, 6),
+            "boundary_overlap_page_ratio": round(max(0.0, -gap) / page_height, 6),
             "horizontal_overlap_ratio": round(overlap, 6),
             "reading_order_delta": order_delta,
             "components": components,

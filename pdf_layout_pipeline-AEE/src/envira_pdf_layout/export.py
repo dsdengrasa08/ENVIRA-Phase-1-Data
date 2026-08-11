@@ -21,6 +21,10 @@ def export_pipeline_result(run):
     paths.raw_markdown.write_text(run.raw_markdown, encoding="utf-8")
     _write_jsonl(paths.page_records_jsonl, run.pages)
     _write_jsonl(paths.regions_jsonl, run.final_regions)
+    _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
+    _write_jsonl(paths.resolved_regions_jsonl, run.resolved_regions)
+    _write_jsonl(paths.caption_relationships_jsonl, run.caption_overlap_relationships)
+    _write_jsonl(paths.caption_groups_jsonl, run.caption_groups)
     _write_jsonl(paths.post_body_assets_jsonl, run.post_body_assets)
     _write_jsonl(paths.post_body_asset_regions_jsonl, run.post_body_asset_regions)
     _write_jsonl(paths.logical_tables_jsonl, run.logical_tables)
@@ -34,6 +38,10 @@ def export_pipeline_result(run):
             paths.post_body_assets_jsonl,
             paths.post_body_asset_regions_jsonl,
             paths.logical_tables_jsonl,
+            paths.raw_regions_jsonl,
+            paths.resolved_regions_jsonl,
+            paths.caption_relationships_jsonl,
+            paths.caption_groups_jsonl,
             paths.summary_csv,
         )
     )

@@ -53,3 +53,13 @@ def table_context_diagnostics(run, page_number=None):
         for association in group["associations"]
     ]
     return pd.DataFrame(rows)
+
+
+def caption_overlap_diagnostics(run, page_number=None):
+    """Return explainable pairwise caption-overlap decisions."""
+    rows = [
+        relationship
+        for relationship in run.caption_overlap_relationships
+        if page_number is None or relationship["page_number"] == page_number
+    ]
+    return pd.DataFrame(rows)
