@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from envira_pdf_layout.config import DocumentConfig, PipelineConfig
+from envira_pdf_layout.config import DocumentConfig, PipelineConfig, TableContextConfig
 
 
 def test_env_config(monkeypatch, tmp_path):
@@ -15,3 +15,10 @@ def test_env_config(monkeypatch, tmp_path):
 def test_invalid_range():
     with pytest.raises(ValueError):
         PipelineConfig(document=DocumentConfig(page_start=3, page_end=2)).validate()
+
+
+def test_invalid_table_context_ratio():
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            table_context=TableContextConfig(max_vertical_gap_page_ratio=1.1)
+        ).validate()

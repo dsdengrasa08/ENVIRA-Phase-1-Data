@@ -61,6 +61,7 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         regions_jsonl=document_dir / "docling_regions.jsonl",
         post_body_assets_jsonl=document_dir / "post_body_assets.jsonl",
         post_body_asset_regions_jsonl=document_dir / "post_body_asset_regions.jsonl",
+        logical_tables_jsonl=document_dir / "logical_tables.jsonl",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (

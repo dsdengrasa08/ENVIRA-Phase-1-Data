@@ -17,7 +17,6 @@ from typing import Any, Iterator
 
 from .types import PipelineResult
 
-
 _REFERENCE_CELLS = (4, 8, 10, 22)
 
 
@@ -36,8 +35,13 @@ def _temporary_environment(values: dict[str, str]) -> Iterator[None]:
 
 
 def _reference_notebook() -> Path:
-    path = Path(__file__).resolve().parents[3] / "pdf_layoutparser_vF.ipynb"
-    if not path.is_file():
+    repository_root = Path(__file__).resolve().parents[3]
+    candidates = (
+        repository_root / "pdf_layoutparser_vF.ipynb",
+        repository_root / "source_pdf_layoutparser" / "pdf_layoutparser_vF.ipynb",
+    )
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
         raise FileNotFoundError(
             "The authoritative pdf_layoutparser_vF.ipynb notebook is required "
             "to run the fidelity-preserving post-processor"
@@ -97,7 +101,12 @@ def run_authoritative_pipeline(conversion, page_set, config) -> PipelineResult:
     }
     with _temporary_environment(environment):
         for index in _REFERENCE_CELLS[:3]:
-            exec(compile(_cell_source(notebook, index), f"reference-cell-{index}", "exec"), namespace)
+            exec(
+                compile(
+                    _cell_source(notebook, index), f"reference-cell-{index}", "exec"
+                ),
+                namespace,
+            )
 
         page_json_dir = artifacts.document_dir / "page_json"
         page_json_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +133,8 @@ def run_authoritative_pipeline(conversion, page_set, config) -> PipelineResult:
                 "PAGE_RECORDS_JSONL": artifacts.page_records_jsonl,
                 "DOCLING_RAW_JSON": artifacts.raw_json,
                 "DOCLING_MARKDOWN": artifacts.raw_markdown,
-                "DOCLING_PAGE_RECORDS_JSONL": artifacts.document_dir / "docling_page_records.jsonl",
+                "DOCLING_PAGE_RECORDS_JSONL": artifacts.document_dir
+                / "docling_page_records.jsonl",
                 "DOCLING_REGIONS_JSONL": artifacts.regions_jsonl,
                 "POST_BODY_ASSETS_JSONL": artifacts.post_body_assets_jsonl,
                 "POST_BODY_ASSET_REGIONS_JSONL": artifacts.post_body_asset_regions_jsonl,
@@ -132,7 +142,11 @@ def run_authoritative_pipeline(conversion, page_set, config) -> PipelineResult:
             }
         )
         exec(
-            compile(_cell_source(notebook, _REFERENCE_CELLS[-1]), "reference-cell-22", "exec"),
+            compile(
+                _cell_source(notebook, _REFERENCE_CELLS[-1]),
+                "reference-cell-22",
+                "exec",
+            ),
             namespace,
         )
 

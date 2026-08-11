@@ -38,3 +38,18 @@ def reading_order_diagnostics(run, page_number):
     return pd.DataFrame(
         [r for r in run.final_regions if r["page_number"] == page_number]
     ).sort_values("layout_reading_order")
+
+
+def table_context_diagnostics(run, page_number=None):
+    """Return accepted table relationships with their explainable features."""
+    rows = [
+        {
+            "internal_id": group["internal_id"],
+            "page_number": group["page_number"],
+            **association,
+        }
+        for group in run.logical_tables
+        if page_number is None or group["page_number"] == page_number
+        for association in group["associations"]
+    ]
+    return pd.DataFrame(rows)

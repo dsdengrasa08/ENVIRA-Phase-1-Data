@@ -23,6 +23,7 @@ def export_pipeline_result(run):
     _write_jsonl(paths.regions_jsonl, run.final_regions)
     _write_jsonl(paths.post_body_assets_jsonl, run.post_body_assets)
     _write_jsonl(paths.post_body_asset_regions_jsonl, run.post_body_asset_regions)
+    _write_jsonl(paths.logical_tables_jsonl, run.logical_tables)
     summary_dataframe(run).to_csv(paths.summary_csv, index=False)
     return ExportManifest(
         (
@@ -32,6 +33,7 @@ def export_pipeline_result(run):
             paths.regions_jsonl,
             paths.post_body_assets_jsonl,
             paths.post_body_asset_regions_jsonl,
+            paths.logical_tables_jsonl,
             paths.summary_csv,
         )
     )

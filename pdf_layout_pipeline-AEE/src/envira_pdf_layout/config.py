@@ -101,6 +101,17 @@ class ReadingOrderConfig:
 
 
 @dataclass(frozen=True)
+class TableContextConfig:
+    """Publisher-independent controls for logical table association."""
+
+    enabled: bool = True
+    max_vertical_gap_page_ratio: float = 0.10
+    min_horizontal_overlap_ratio: float = 0.18
+    acceptance_score: float = 4.5
+    ambiguity_margin: float = 0.6
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     write_raw: bool = True
     write_regions: bool = True
@@ -118,6 +129,7 @@ class PipelineConfig:
     footer: FooterFilterConfig = field(default_factory=FooterFilterConfig)
     tail: TailFilterConfig = field(default_factory=TailFilterConfig)
     reading_order: ReadingOrderConfig = field(default_factory=ReadingOrderConfig)
+    table_context: TableContextConfig = field(default_factory=TableContextConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
 
@@ -206,3 +218,11 @@ class PipelineConfig:
             raise ValueError("page_end must not precede page_start")
         if self.document.render_dpi <= 0:
             raise ValueError("render_dpi must be positive")
+        if not 0 < self.table_context.max_vertical_gap_page_ratio <= 1:
+            raise ValueError("table context vertical gap ratio must be in (0, 1]")
+        if not 0 <= self.table_context.min_horizontal_overlap_ratio <= 1:
+            raise ValueError("table context overlap ratio must be in [0, 1]")
+        if self.table_context.acceptance_score < 0:
+            raise ValueError("table context acceptance score must be non-negative")
+        if self.table_context.ambiguity_margin < 0:
+            raise ValueError("table context ambiguity margin must be non-negative")
