@@ -79,6 +79,7 @@ def run_layout_pipeline(conversion, page_set, config):
             result.pages,
             document_id=result.document.doc_id,
             config=config.table_context,
+            relationships=result.layout_relationships,
         )
         groups_by_page: dict[int, list[dict]] = {}
         for group in result.logical_tables:

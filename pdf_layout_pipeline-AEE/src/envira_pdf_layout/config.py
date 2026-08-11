@@ -110,6 +110,12 @@ class TableContextConfig:
     acceptance_score: float = 4.5
     ambiguity_margin: float = 0.6
     max_boundary_overlap_page_ratio: float = 0.008
+    fragment_max_gap_page_ratio: float = 0.018
+    fragment_max_line_gap_ratio: float = 1.8
+    fragment_min_horizontal_overlap: float = 0.30
+    fragment_edge_alignment_page_ratio: float = 0.025
+    fragment_acceptance_score: float = 4.5
+    fragment_ambiguity_margin: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -268,6 +274,20 @@ class PipelineConfig:
             raise ValueError("table context ambiguity margin must be non-negative")
         if not 0 <= self.table_context.max_boundary_overlap_page_ratio <= 1:
             raise ValueError("table context boundary overlap ratio must be in [0, 1]")
+        for name in (
+            "fragment_max_gap_page_ratio",
+            "fragment_min_horizontal_overlap",
+            "fragment_edge_alignment_page_ratio",
+        ):
+            if not 0 <= getattr(self.table_context, name) <= 1:
+                raise ValueError(f"table context {name} must be in [0, 1]")
+        for name in (
+            "fragment_max_line_gap_ratio",
+            "fragment_acceptance_score",
+            "fragment_ambiguity_margin",
+        ):
+            if getattr(self.table_context, name) < 0:
+                raise ValueError(f"table context {name} must be non-negative")
         overlap = self.caption_overlap
         for name in (
             "duplicate_iou",

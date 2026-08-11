@@ -126,3 +126,120 @@ def test_table_label_variants_are_supporting_metadata():
             ]
         )
         assert groups[0]["printed_label"], (index, label)
+
+
+def test_seeded_caption_graph_grows_multiple_text_fragments():
+    regions = [
+        region("label", "Caption", [100, 80, 220, 105], "Table 12.", 1),
+        region(
+            "line1", "Text", [100, 108, 700, 133], "Description of measured outcomes", 2
+        ),
+        region(
+            "line2",
+            "Text",
+            [100, 136, 700, 161],
+            "continued for all treatment groups",
+            3,
+        ),
+        region("line3", "Text", [100, 164, 700, 189], "and sampling periods.", 4),
+        region("table", "Table", [100, 194, 700, 600], order=5),
+    ]
+
+    group = associate(regions)[0]
+
+    assert group["identifier_region_ids"] == ["label"]
+    assert group["caption_region_ids"] == ["line1", "line2", "line3"]
+    fragment_edges = [
+        item
+        for item in group["associations"]
+        if item["proposed_role"] == "caption_fragment"
+    ]
+    assert len(fragment_edges) == 3
+    assert group["caption_fragment_association"]["strategy"] == "seeded_local_graph"
+    assert [item["type"] for item in regions] == [
+        "Caption",
+        "Text",
+        "Text",
+        "Text",
+        "Table",
+    ]
+
+
+def test_seeded_graph_rejects_nearby_body_paragraph():
+    regions = [
+        region(
+            "paragraph",
+            "Text",
+            [100, 75, 700, 105],
+            "Results were compared with earlier observations in the study.",
+            1,
+        ),
+        region("caption", "Caption", [100, 108, 700, 135], "Table 7. Outcomes", 2),
+        region("table", "Table", [100, 140, 700, 500], order=3),
+    ]
+
+    group = associate(regions)[0]
+
+    assert group["caption_region_ids"] == ["caption"]
+    assert "paragraph" not in group["caption_region_ids"]
+
+
+def test_caption_below_table_can_grow_a_continuation():
+    regions = [
+        region("table", "Table", [100, 100, 700, 500], order=1),
+        region("label", "Caption", [100, 505, 700, 532], "Table 9.", 2),
+        region(
+            "description",
+            "Text",
+            [100, 535, 700, 562],
+            "Description printed below the table",
+            3,
+        ),
+    ]
+
+    group = associate(regions)[0]
+
+    assert group["identifier_region_ids"] == ["label"]
+    assert group["caption_region_ids"] == ["description"]
+
+
+def test_fragment_competing_between_tables_remains_unassigned():
+    regions = [
+        region("left-label", "Caption", [50, 100, 450, 125], "Table 1.", 1, "left"),
+        region("right-label", "Caption", [550, 100, 950, 125], "Table 2.", 2, "right"),
+        region("wide", "Text", [50, 128, 950, 153], "Shared-looking nearby text", 3),
+        region("left-table", "Table", [50, 158, 450, 500], order=4, column="left"),
+        region("right-table", "Table", [550, 158, 950, 500], order=5, column="right"),
+    ]
+
+    groups = associate(regions)
+
+    assert all("wide" not in group["caption_region_ids"] for group in groups)
+
+
+def test_overlap_relationship_evidence_is_retained_on_fragment_edge():
+    regions = [
+        region("label", "Caption", [100, 100, 700, 125], "Table 4.", 1),
+        region("line", "Text", [100, 128, 700, 153], "continued caption", 2),
+        region("table", "Table", [100, 158, 700, 500], order=3),
+    ]
+    relationship = {
+        "left_region_id": "label",
+        "right_region_id": "line",
+        "kind": "FRAGMENT_CANDIDATE",
+    }
+
+    group = associate_table_context(
+        regions,
+        PAGES,
+        document_id="doc",
+        relationships=[relationship],
+    )[0]
+    edge = next(
+        item
+        for item in group["associations"]
+        if item["proposed_role"] == "caption_fragment"
+    )
+
+    assert edge["features"]["relationship_kinds"] == ["FRAGMENT_CANDIDATE"]
+    assert edge["features"]["components"]["overlap_evidence"] == 0.5
