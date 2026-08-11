@@ -87,6 +87,10 @@ resolved reading order; raw and authoritative reading order remain unchanged.
 Table-context association runs on the conservatively resolved regions. A subsequent
 context-aware pass creates `caption_groups`, preserving identifier and fragment
 roles, source IDs, relationship evidence, ambiguity status, and parent table IDs.
+Each group also exposes one deduplicated `text` value and the minimal
+`semantic_text_region_ids` needed to produce it; contained identifier/line boxes
+remain in `ordered_source_region_ids` for geometry and provenance but are not read
+again as separate captions.
 The physical table bbox is never resized. Outputs include raw, authoritative,
 resolved, relationship, caption-group, and logical-table JSONL artifacts. Raw,
 resolved, table-context, and caption-relationship visualization functions remain

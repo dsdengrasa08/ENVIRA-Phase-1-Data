@@ -76,6 +76,8 @@ def test_context_group_preserves_identifier_and_deduplicates_emission_membership
         region("table", "Table", [90, 185, 700, 500], order=3),
     ]
     resolved, relationships, _ = resolve_caption_overlaps(regions, PAGES)
+    resolved_by_id = {item["layout_region_id"]: item for item in resolved}
+    assert resolved_by_id["id"]["emission_policy"] == "suppress_duplicate_text_emission"
     logical = [
         {
             "internal_id": "doc:p0001:t01",
@@ -87,8 +89,44 @@ def test_context_group_preserves_identifier_and_deduplicates_emission_membership
     ]
     group = build_caption_groups(resolved, logical, relationships, PAGES)[0]
     assert group["ordered_source_region_ids"] == ["id", "caption"]
-    assert group["semantic_text_region_ids"] == ["id", "caption"]
+    assert group["semantic_text_region_ids"] == ["caption"]
+    assert group["text"] == "Table 2. Values"
     assert group["relationships"][0]["status"] == "preserved_as_nested_component"
+
+
+def test_overlapping_caption_fragments_emit_one_deduplicated_caption_text():
+    regions = [
+        region(
+            "first",
+            "Caption",
+            [100, 100, 700, 145],
+            "Table 3. Stalk yield and CCS",
+            1,
+        ),
+        region(
+            "second",
+            "Text",
+            [100, 140, 700, 185],
+            "CCS, sugar yield observed at three rates.",
+            2,
+        ),
+        region("table", "Table", [100, 190, 700, 500], order=3),
+    ]
+    resolved, relationships, _ = resolve_caption_overlaps(regions, PAGES)
+    logical = [
+        {
+            "internal_id": "doc:p0001:t01",
+            "page_number": 1,
+            "table_region_id": "table",
+            "identifier_region_ids": ["first"],
+            "caption_region_ids": ["first", "second"],
+        }
+    ]
+    group = build_caption_groups(resolved, logical, relationships, PAGES)[0]
+    assert group["semantic_text_region_ids"] == ["first", "second"]
+    assert group["text"] == (
+        "Table 3. Stalk yield and CCS sugar yield observed at three rates."
+    )
 
 
 def test_context_group_links_caption_fragments_separated_by_small_gap():

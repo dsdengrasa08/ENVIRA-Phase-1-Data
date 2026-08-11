@@ -141,6 +141,21 @@ def features_text_equivalent(a, b) -> bool:
     return bool(left and right and left == right)
 
 
+def _text_representative(a: LayoutRegion, b: LayoutRegion) -> tuple[str, str] | None:
+    """Return ``(covered, representative)`` when one item's text subsumes another."""
+    left, right = _normalized_text(a), _normalized_text(b)
+    if not left or not right:
+        return None
+    left_id, right_id = str(a["layout_region_id"]), str(b["layout_region_id"])
+    if left == right:
+        return None  # Exact alternatives are handled by duplicate canonicalization.
+    if left in right:
+        return left_id, right_id
+    if right in left:
+        return right_id, left_id
+    return None
+
+
 def _relationship(a, b, features, config):
     same_class = a.get("type") == b.get("type")
     compatible_roles = _compatible_text_roles(a, b)
@@ -236,6 +251,16 @@ def resolve_caption_overlaps(
                     relation["status"] = "preserved_as_nested_component"
                 elif kind in {"BOUNDARY_TOUCH", "COMPLEMENTARY_FRAGMENT"}:
                     relation["status"] = "preserved_for_grouping"
+                representative = _text_representative(a, b)
+                if (
+                    kind != "DUPLICATE"
+                    and representative
+                    and _compatible_text_roles(a, b)
+                ):
+                    covered_id, representative_id = representative
+                    relation["semantic_covered_region_id"] = covered_id
+                    relation["semantic_representative_region_id"] = representative_id
+                    relation["status"] = "preserved_without_duplicate_emission"
                 relationships.append(relation)
                 if kind == "DUPLICATE":
                     duplicate_edges.append(
@@ -323,6 +348,16 @@ def resolve_caption_overlaps(
             # Preserve the region and its text, but tell flattened consumers that
             # hierarchy-aware emission is preferable to treating it as a peer.
             region["emission_policy"] = "emit_as_nested_child"
+        semantic_representatives = sorted(
+            {
+                relation["semantic_representative_region_id"]
+                for relation in relations_by_id[region_id]
+                if relation.get("semantic_covered_region_id") == region_id
+            }
+        )
+        if semantic_representatives:
+            region["semantic_duplicate_of_region_ids"] = semantic_representatives
+            region["emission_policy"] = "suppress_duplicate_text_emission"
         output.append(region)
     resolved_by_page = defaultdict(list)
     for region in output:
@@ -394,6 +429,54 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 float(by_id[rid]["bbox_px"][0]),
             ),
         )
+        covered_ids = {
+            relation["semantic_covered_region_id"]
+            for relation in group_relations
+            if relation.get("semantic_covered_region_id") in member_ids
+            and relation.get("semantic_representative_region_id") in member_ids
+        }
+        for left_index, left_id in enumerate(ordered):
+            left_text = _normalized_text(by_id[left_id])
+            if not left_text:
+                continue
+            for right_id in ordered[left_index + 1 :]:
+                right_text = _normalized_text(by_id[right_id])
+                if not right_text:
+                    continue
+                if left_text == right_text:
+                    covered_ids.add(right_id)
+                elif left_text in right_text:
+                    covered_ids.add(left_id)
+                elif right_text in left_text:
+                    covered_ids.add(right_id)
+        semantic_ids = [
+            region_id for region_id in ordered if region_id not in covered_ids
+        ]
+
+        # Create one consumer-facing caption string. Source fragments and their
+        # geometry remain separate, but overlapping boundary tokens are emitted
+        # once (for example, "Table 3" plus "Table 3. Stalk yield ...").
+        semantic_tokens: list[str] = []
+        for region_id in semantic_ids:
+            fragment_tokens = _text(by_id[region_id]).split()
+            if not fragment_tokens:
+                continue
+            normalized_existing = [
+                re.sub(r"\W+", "", t.casefold()) for t in semantic_tokens
+            ]
+            normalized_fragment = [
+                re.sub(r"\W+", "", token.casefold()) for token in fragment_tokens
+            ]
+            max_overlap = min(len(normalized_existing), len(normalized_fragment))
+            overlap = next(
+                (
+                    size
+                    for size in range(max_overlap, 0, -1)
+                    if normalized_existing[-size:] == normalized_fragment[:size]
+                ),
+                0,
+            )
+            semantic_tokens.extend(fragment_tokens[overlap:])
         # A region listed as both identifier and caption emits once.
         groups.append(
             {
@@ -405,7 +488,8 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 "identifier_region_ids": identifier_ids,
                 "caption_fragment_region_ids": caption_ids,
                 "ordered_source_region_ids": ordered,
-                "semantic_text_region_ids": ordered,
+                "semantic_text_region_ids": semantic_ids,
+                "text": " ".join(semantic_tokens).strip(),
                 "source_region_ids": [
                     sid
                     for rid in ordered
