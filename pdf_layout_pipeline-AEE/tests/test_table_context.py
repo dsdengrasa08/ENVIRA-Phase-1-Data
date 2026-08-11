@@ -155,7 +155,9 @@ def test_seeded_caption_graph_grows_multiple_text_fragments():
         if item["proposed_role"] == "caption_fragment"
     ]
     assert len(fragment_edges) == 3
-    assert group["caption_fragment_association"]["strategy"] == "seeded_local_graph"
+    assert group["caption_fragment_association"]["strategy"] == (
+        "caption_table_corridor_then_seeded_local_graph"
+    )
     assert [item["type"] for item in regions] == [
         "Caption",
         "Text",
@@ -163,6 +165,31 @@ def test_seeded_caption_graph_grows_multiple_text_fragments():
         "Text",
         "Table",
     ]
+
+
+def test_all_text_between_caption_and_table_is_caption_even_if_paragraph_like():
+    regions = [
+        region("label", "Caption", [100, 80, 220, 105], "Table 13.", 1),
+        region(
+            "description",
+            "Text",
+            [100, 108, 700, 153],
+            "Soil density, pH, total carbon, total nitrogen, clay, silt and sand were measured.",
+            2,
+        ),
+        region("table", "Table", [100, 158, 700, 600], order=3),
+    ]
+
+    group = associate(regions)[0]
+
+    assert group["identifier_region_ids"] == ["label"]
+    assert group["caption_region_ids"] == ["description"]
+    edge = next(
+        item
+        for item in group["associations"]
+        if item["proposed_role"] == "caption_fragment"
+    )
+    assert edge["features"]["body_text_semantics_ignored"] is True
 
 
 def test_seeded_graph_rejects_nearby_body_paragraph():

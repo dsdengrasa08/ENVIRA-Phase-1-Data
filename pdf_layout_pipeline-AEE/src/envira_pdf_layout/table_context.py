@@ -327,6 +327,73 @@ def _group_bbox(regions: list[LayoutRegion]) -> list[float]:
     ]
 
 
+def _caption_table_corridor_edge(
+    candidate: LayoutRegion,
+    seed: LayoutRegion,
+    table: LayoutRegion,
+    page_width: float,
+    page_height: float,
+    config: TableContextConfig,
+    relationship_kinds: set[str],
+) -> dict[str, Any] | None:
+    """Associate text physically sandwiched between a caption and its table.
+
+    Once a caption seed has been unambiguously assigned to a table, geometry is
+    authoritative for the intervening area.  In particular, paragraph-like
+    wording must not prevent a detector-split caption continuation from being
+    included.  This is intentionally distinct from speculative graph growth
+    beyond the seed-to-table corridor, where the stricter semantic safeguards
+    still apply.
+    """
+    if candidate.get("type") not in _TEXT_TYPES:
+        return None
+    text = str(candidate.get("text") or "").strip()
+    if not text:
+        return None
+
+    cb = list(map(float, candidate["bbox_px"]))
+    sb = list(map(float, seed["bbox_px"]))
+    tb = list(map(float, table["bbox_px"]))
+    tolerance = config.max_boundary_overlap_page_ratio * page_height
+    seed_above = (sb[1] + sb[3]) / 2.0 < (tb[1] + tb[3]) / 2.0
+    if seed_above:
+        between = cb[1] >= sb[3] - tolerance and cb[3] <= tb[1] + tolerance
+    else:
+        between = cb[1] >= tb[3] - tolerance and cb[3] <= sb[1] + tolerance
+    if not between or not _column_compatible(candidate, table, page_width):
+        return None
+
+    table_overlap = _overlap_ratio(cb, tb)
+    seed_overlap = _overlap_ratio(cb, sb)
+    if max(table_overlap, seed_overlap) < config.min_horizontal_overlap_ratio:
+        return None
+
+    return {
+        "table_region_id": str(table["layout_region_id"]),
+        "region_id": str(candidate["layout_region_id"]),
+        "member_region_id": str(seed["layout_region_id"]),
+        "proposed_role": "caption_fragment",
+        "score": 10.0,
+        "accepted": False,
+        "direction": "above" if seed_above else "below",
+        "features": {
+            "rule": "text_between_associated_caption_and_table",
+            "horizontal_overlap_with_table": round(table_overlap, 6),
+            "horizontal_overlap_with_caption_seed": round(seed_overlap, 6),
+            "body_text_semantics_ignored": True,
+            "relationship_kinds": sorted(relationship_kinds),
+            "components": {
+                "overlap_evidence": (
+                    0.5
+                    if relationship_kinds
+                    & {"FRAGMENT_CANDIDATE", "COMPLEMENTARY_FRAGMENT"}
+                    else 0.0
+                )
+            },
+        },
+    }
+
+
 def associate_table_context(
     regions: list[LayoutRegion],
     pages: list[dict[str, Any]],
@@ -456,6 +523,56 @@ def associate_table_context(
             for region_id in group[key]
         }
         tables_by_id = {str(table["layout_region_id"]): table for table in tables}
+
+        # A detector frequently emits only the short "Table N." label as a
+        # Caption and emits the description as ordinary Text.  Include every
+        # text region physically between an accepted caption seed and its table
+        # before attempting conservative graph growth outside that corridor.
+        corridor_proposals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for table_id, group in page_groups.items():
+            seeds = list(
+                dict.fromkeys(
+                    group["identifier_region_ids"] + group["caption_region_ids"]
+                )
+            )
+            for seed_id in seeds:
+                for candidate in page_regions:
+                    candidate_id = str(candidate.get("layout_region_id"))
+                    if candidate_id in owned or candidate_id == table_id:
+                        continue
+                    edge = _caption_table_corridor_edge(
+                        candidate,
+                        region_by_id[seed_id],
+                        tables_by_id[table_id],
+                        width,
+                        height,
+                        config,
+                        relationship_kinds.get(
+                            frozenset((candidate_id, seed_id)), set()
+                        ),
+                    )
+                    if edge:
+                        corridor_proposals[candidate_id].append(edge)
+        for region_id, alternatives in corridor_proposals.items():
+            table_ids = {edge["table_region_id"] for edge in alternatives}
+            # Do not guess when the same physical text lies in corridors for
+            # multiple tables. Within one table, the closest seed is sufficient.
+            if len(table_ids) != 1:
+                continue
+            winner = min(
+                alternatives,
+                key=lambda edge: abs(
+                    _order(region_by_id[edge["member_region_id"]])
+                    - _order(region_by_id[region_id])
+                ),
+            )
+            winner["accepted"] = True
+            winner["alternative_count"] = len(alternatives) - 1
+            group = page_groups[winner["table_region_id"]]
+            group["caption_region_ids"].append(region_id)
+            group["associations"].append(winner)
+            owned.add(region_id)
+
         while True:
             proposals: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for table_id, group in page_groups.items():
@@ -549,7 +666,7 @@ def associate_table_context(
                 else 1.0
             )
             group["caption_fragment_association"] = {
-                "strategy": "seeded_local_graph",
+                "strategy": "caption_table_corridor_then_seeded_local_graph",
                 "semantic_role": "table_caption",
                 "fragment_region_ids": list(group["caption_region_ids"]),
                 "source_geometry_preserved": True,
