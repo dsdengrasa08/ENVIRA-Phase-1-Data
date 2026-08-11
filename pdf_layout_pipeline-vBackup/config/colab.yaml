@@ -1,0 +1,4 @@
+runtime:
+  use_google_drive: true
+  drive_mount_point: /content/drive
+  project_dir: /content/drive/MyDrive/00-ENVIRA/01-LayoutParser/phase1_docling
