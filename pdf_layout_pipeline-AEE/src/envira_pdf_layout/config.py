@@ -123,6 +123,9 @@ class CaptionOverlapConfig:
     nested_containment: float = 0.92
     fragment_max_gap_page_ratio: float = 0.012
     boundary_overlap_page_ratio: float = 0.008
+    # Maximum penetration relative to the smaller region height that is treated
+    # as harmless contact between unlike semantic roles.
+    boundary_overlap_ratio: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -244,7 +247,12 @@ class PipelineConfig:
         if not 0 <= self.table_context.max_boundary_overlap_page_ratio <= 1:
             raise ValueError("table context boundary overlap ratio must be in [0, 1]")
         overlap = self.caption_overlap
-        for name in ("duplicate_iou", "duplicate_area_ratio", "nested_containment"):
+        for name in (
+            "duplicate_iou",
+            "duplicate_area_ratio",
+            "nested_containment",
+            "boundary_overlap_ratio",
+        ):
             if not 0 <= getattr(overlap, name) <= 1:
                 raise ValueError(f"caption overlap {name} must be in [0, 1]")
         for name in (

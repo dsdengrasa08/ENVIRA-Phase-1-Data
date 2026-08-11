@@ -65,13 +65,24 @@ reserved on each page-local group for a later document-level continuation stage.
 
 ## Caption overlap resolution
 
-Caption overlap handling is deliberately separate from physical layout filtering.
+Overlap handling is deliberately separate from physical layout filtering. Despite
+the compatibility module name, intersecting regions of every semantic class are
+analyzed; caption and table relationships receive additional role-aware grouping.
 The pipeline preserves `raw_regions` and authoritative `final_regions`, then creates
-`resolved_regions` by collapsing only near-identical, same-class detections with
-compatible text evidence. Nested identifiers, complementary caption fragments,
+`resolved_regions` by collapsing only near-identical, role-compatible detections
+with compatible text evidence. Nested identifiers, complementary caption fragments,
 caption/table boundary overlaps, and ambiguous pairs remain available. Pairwise
 geometry includes IoU, directional containment, intersection over the smaller
-region, horizontal/vertical overlap, relative area, and normalized edge deltas.
+region, horizontal/vertical overlap, relative area, token coverage/Jaccard,
+normalized center distance, and normalized edge deltas. Slight asset/text boundary
+contacts are distinguished from substantial cross-role overlaps. Directional
+containment records explicit parent and child IDs, and unique aligned text takes
+precedence over a geometric nesting label.
+
+Duplicate edges are resolved as connected components so three-way and chained
+detections select one deterministic canonical item. Resolved regions retain source
+IDs, an emission policy for canonical versus nested-child content, and a contiguous
+resolved reading order; raw and authoritative reading order remain unchanged.
 
 Table-context association runs on the conservatively resolved regions. A subsequent
 context-aware pass creates `caption_groups`, preserving identifier and fragment
