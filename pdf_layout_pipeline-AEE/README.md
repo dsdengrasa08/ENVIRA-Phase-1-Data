@@ -42,6 +42,24 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
+- `table_context.py`: publisher-independent logical association of each retained
+  table body with optional identifier, caption, note, footnote, and source regions.
+
+## Logical table context
+
+After the authoritative filters and reading-order assignment, the package creates
+one logical group for every retained table. Groups reference existing region IDs;
+they do not reclassify regions or enlarge the physical table-body bounding box.
+Association combines normalized geometry, column compatibility, reading order,
+generic lexical and optional typography evidence, structural stopping boundaries,
+and exclusive candidate ownership. Results are available in
+`PipelineResult.logical_tables`, each page's `logical_tables` field, diagnostics,
+the optional table-context overlay, and `logical_tables.jsonl`.
+
+Printed labels such as ordinary, supplementary, extended-data, Roman-numeral, and
+appendix table identifiers are metadata. Stable internal IDs do not depend on OCR
+success or the presence of a printed number. Cross-page continuation fields are
+reserved on each page-local group for a later document-level continuation stage.
 
 ## Output compatibility and validation
 

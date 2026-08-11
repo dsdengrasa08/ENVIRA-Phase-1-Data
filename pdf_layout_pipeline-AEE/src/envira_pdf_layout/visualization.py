@@ -85,3 +85,51 @@ def render_layout_overlays(run, save=True):
         )
         for page in run.pages
     ]
+
+
+def render_table_context_overlay(run, page_number, output_path: Path | None = None):
+    """Render every logical table while leaving the raw layout overlay available."""
+    import cv2
+
+    page = next(page for page in run.pages if page["page_number"] == page_number)
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    regions = {r["layout_region_id"]: r for r in run.final_regions}
+    palette = [(0, 140, 255), (220, 80, 20), (40, 170, 80), (180, 60, 180)]
+    role_specs = {
+        "Body": (4, cv2.LINE_8),
+        "Identifier": (2, cv2.LINE_AA),
+        "Caption": (2, cv2.LINE_AA),
+        "Note": (1, cv2.LINE_AA),
+    }
+    for index, group in enumerate(
+        (g for g in run.logical_tables if g["page_number"] == page_number), 1
+    ):
+        color = palette[(index - 1) % len(palette)]
+        roles = {
+            "Body": [group["table_region_id"]],
+            "Identifier": group["identifier_region_ids"],
+            "Caption": group["caption_region_ids"],
+            "Note": group["note_region_ids"],
+        }
+        for role, region_ids in roles.items():
+            thickness, line_type = role_specs[role]
+            for fragment, region_id in enumerate(region_ids, 1):
+                region = regions.get(region_id)
+                if not region:
+                    continue
+                x0, y0, x1, y1 = int_bbox(tuple(region["bbox_px"]))
+                cv2.rectangle(image, (x0, y0), (x1, y1), color, thickness, line_type)
+                suffix = f" {fragment}" if len(region_ids) > 1 else ""
+                _label(
+                    image,
+                    f"T{index:02d} / {role}{suffix}",
+                    (x0 + 4, max(18, y0 + 18)),
+                    color,
+                )
+    _label(image, f"Logical table context | page {page_number}", (24, 36), (0, 0, 255))
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)

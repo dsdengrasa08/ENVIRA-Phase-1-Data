@@ -16,3 +16,9 @@ footer:
   enabled: true
 tail:
   enabled: true
+table_context:
+  enabled: true
+  max_vertical_gap_page_ratio: 0.10
+  min_horizontal_overlap_ratio: 0.18
+  acceptance_score: 4.5
+  ambiguity_margin: 0.6

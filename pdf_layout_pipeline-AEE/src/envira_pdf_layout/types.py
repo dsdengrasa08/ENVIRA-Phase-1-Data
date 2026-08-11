@@ -24,6 +24,7 @@ class ArtifactPaths:
     regions_jsonl: Path
     post_body_assets_jsonl: Path
     post_body_asset_regions_jsonl: Path
+    logical_tables_jsonl: Path
     summary_csv: Path
 
 
@@ -90,6 +91,7 @@ class PipelineResult:
     diagnostics: dict[str, Any]
     raw_document: dict[str, Any]
     raw_markdown: str = ""
+    logical_tables: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
