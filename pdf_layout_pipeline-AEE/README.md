@@ -96,6 +96,13 @@ resolved, relationship, caption-group, and logical-table JSONL artifacts. Raw,
 resolved, table-context, and caption-relationship visualization functions remain
 separate so model and post-processing behavior can be inspected independently.
 
+The workflow notebook is pinned to `pdf_layout_pipeline-AEE/src` and verifies the
+imported package path at runtime, preventing a legacy sibling directory or a stale
+Colab import from silently bypassing overlap resolution. Its primary overlay uses
+the semantic resolved view, where all physical members of a caption group are
+rendered as one union box; raw and physical resolved overlays remain available as
+explicit diagnostics.
+
 ## Output compatibility and validation
 
 The migration preserves stable document IDs, page-oriented records, normalized

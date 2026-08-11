@@ -32,6 +32,22 @@ def caption_groups_dataframe(run):
     return pd.DataFrame(run.caption_groups)
 
 
+def semantic_captions_dataframe(run):
+    """Return one row and one consumer-facing text value per logical caption."""
+    columns = [
+        "resolved_region_id",
+        "page_number",
+        "parent_table_id",
+        "parent_table_region_id",
+        "text",
+        "semantic_text_region_ids",
+        "ordered_source_region_ids",
+        "status",
+    ]
+    frame = pd.DataFrame(run.caption_groups)
+    return frame.reindex(columns=columns)
+
+
 def region_type_counts_dataframe(run):
     df = regions_dataframe(run)
     return (
