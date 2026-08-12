@@ -19,7 +19,11 @@ from .types import PipelineResult
 
 @contextmanager
 def _temporary_environment(values: dict[str, str]) -> Iterator[None]:
-    previous = {name: os.environ.get(name) for name in values}
+    """Run the legacy core against the captured config, never ambient PHASE1 state."""
+    managed = {name for name in os.environ if name.startswith("PHASE1_")} | set(values)
+    previous = {name: os.environ.get(name) for name in managed}
+    for name in managed:
+        os.environ.pop(name, None)
     os.environ.update(values)
     try:
         yield
@@ -36,6 +40,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
     document = page_set.document
     artifacts = document.artifacts
     environment = {
+        **config.legacy_core_environment,
         "PHASE1_SOURCE_PDF": str(document.pdf_path),
         "PHASE1_USE_GOOGLE_DRIVE": "0",
         "PHASE1_PROJECT_DIR": str(config.runtime.project_dir),
@@ -44,6 +49,33 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         "PHASE1_RENDER_DPI": str(config.document.render_dpi),
         "PHASE1_RUN_ID": config.document.run_id,
         "PHASE1_DOCLING_EXCLUDE_LABELS": ",".join(sorted(config.exclude_labels)),
+        "PHASE1_DOCLING_DO_OCR": str(int(config.docling.do_ocr)),
+        "PHASE1_DOCLING_DO_TABLE_STRUCTURE": str(int(config.docling.do_table_structure)),
+        "PHASE1_DOCLING_DO_FORMULA_ENRICHMENT": str(int(config.docling.do_formula_enrichment)),
+        "PHASE1_DOCLING_DO_CODE_ENRICHMENT": str(int(config.docling.do_code_enrichment)),
+        "PHASE1_DOCLING_CODE_FORMULA_PRESET": config.docling.code_formula_preset,
+        "PHASE1_PAGE1_UPPER_FRONTMATTER_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_LOWER_METADATA_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_POST_ABSTRACT_AUTHOR_METADATA_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES": ",".join(config.page1.abstract_aliases),
+        "PHASE1_PAGE1_TITLE_Y_MIN": str(config.page1.title_y_min),
+        "PHASE1_PAGE1_TITLE_Y_MAX": str(config.page1.title_y_max),
+        "PHASE1_BODY_ANCHOR_Y_MAX": str(config.page1.body_anchor_y_max),
+        "PHASE1_PAGE1_LOWER_METADATA_MIN_Y": str(config.page1.lower_metadata_min_y),
+        "PHASE1_PAGE1_HARD_FOOTER_Y": str(config.page1.hard_footer_y),
+        "PHASE1_LATER_PAGE_UPPER_HEADER_FILTER": str(int(config.headers.enabled)),
+        "PHASE1_LATER_PAGE_HEADER_CANDIDATE_Y_MAX": str(config.headers.top_band_ratio),
+        "PHASE1_LATER_PAGE_HEADER_MIN_REPEAT_PAGES": str(config.headers.min_repeat_pages),
+        "PHASE1_SMALL_EDGE_FIGURE_FILTER": str(int(config.figures.filter_small_edge_figures)),
+        "PHASE1_CAPTION_FIGURE_COMPLETION": str(int(config.figures.complete_caption_anchored)),
+        "PHASE1_SMALL_EDGE_FIGURE_HEADER_Y1_MAX": str(config.figures.header_y1_max),
+        "PHASE1_SMALL_EDGE_FIGURE_FOOTER_Y0_MIN": str(config.figures.footer_y0_min),
+        "PHASE1_REPEATED_FOOTER_VISUAL_FILTER": str(int(config.footer.enabled)),
+        "PHASE1_COMPACT_FOOTER_FURNITURE_FILTER": str(int(config.footer.compact_enabled)),
+        "PHASE1_REPEATED_FOOTER_VISUAL_MIN_REPEAT_PAGES": str(config.footer.min_repeat_pages),
+        "PHASE1_COMPACT_FOOTER_Y0_MIN": str(config.footer.y0_min),
+        "PHASE1_CONCLUSION_TAIL_FILTER": str(int(config.tail.enabled)),
+        "PHASE1_DIRECT_BACKMATTER_FALLBACK": str(int(config.tail.direct_backmatter_fallback)),
     }
     display = lambda *args, **kwargs: None
     with _temporary_environment(environment):

@@ -15,6 +15,7 @@ from .table_context import associate_table_context
 def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
     result = run_independent_core(conversion, page_set, config)
+    result.diagnostics["effective_config"] = config.to_dict()
     try:
         docling_version = version("docling")
     except PackageNotFoundError:

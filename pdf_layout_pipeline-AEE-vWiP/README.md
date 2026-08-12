@@ -9,8 +9,8 @@ directory is required to import, test, or run the pipeline.
 
 ### Colab
 
-Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, run the optional
-installation cell, and execute top to bottom. Google Drive and model paths support
+Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, select the YAML
+configuration profile, run the optional installation cell, and execute top to bottom. Google Drive and model paths support
 the documented `PHASE1_*` environment-variable overrides.
 
 ### Local/server
@@ -43,8 +43,6 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `region_conversion.py`: the active Docling-to-ENVIRA conversion boundary. It
   supports object and serialized Docling documents, preserves production IDs and
   fields, and reports skipped provenance explicitly.
-- `stages.py`: the small context and transform-stage contracts used for incremental
-  extraction from the preserved core.
 - `filtering/`, `assets/`, `reading_order.py`: smaller independently testable
   compatibility helpers. Until each is migrated under equivalence tests, the
   corresponding established production heuristic remains in `independent_core.py`.
@@ -177,3 +175,14 @@ change, compare a fixed reference run against the original notebook for:
 6. overlay dimensions, labels, geometry, and representative visual diffs.
 
 Algorithmic cleanup should be committed separately from output-equivalence work.
+
+## Configuration precedence
+
+`PipelineConfig.load()` is the authoritative loader. Values are merged in the
+following order: typed defaults, the selected YAML profile, `PHASE1_*` environment
+variables, and explicit notebook/CLI overrides. Unknown YAML sections and fields are
+rejected. The complete effective configuration, its profile path, value provenance,
+and the captured legacy-core environment are written to `effective_config.json`.
+`PipelineConfig.from_env()` remains a compatibility wrapper around the same loader.
+The preserved core executes against the captured configuration snapshot with ambient
+`PHASE1_*` variables isolated for reproducible runs.

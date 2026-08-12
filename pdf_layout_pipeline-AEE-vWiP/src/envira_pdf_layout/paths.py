@@ -70,6 +70,7 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         layout_relationships_jsonl=document_dir / "layout_relationships.jsonl",
         resolution_decisions_jsonl=document_dir / "resolution_decisions.jsonl",
         suppressed_regions_jsonl=document_dir / "suppressed_layout_regions.jsonl",
+        effective_config_json=document_dir / "effective_config.json",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (
