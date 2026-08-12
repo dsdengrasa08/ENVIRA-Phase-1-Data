@@ -53,3 +53,11 @@ def test_invalid_caption_validation_controls():
         PipelineConfig(
             caption_validation=CaptionValidationConfig(max_parent_gap_page_ratio=1.1)
         ).validate()
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            caption_validation=CaptionValidationConfig(max_parent_gap_page_ratio=0)
+        ).validate()
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            caption_validation=CaptionValidationConfig(min_segment_lines=0)
+        ).validate()

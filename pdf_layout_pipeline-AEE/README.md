@@ -123,6 +123,11 @@ detector ID and box; ambiguous regions remain unchanged with auditable evidence.
 
 This prevents descriptive cross-references such as “Figure 3 ... reported in Table
 2” from being split merely because another object identifier occurs in the text.
+If native extraction omits a small styled leading identifier, the first segment may
+still be inferred from a distinct, type-compatible neighboring object, but only
+when a later explicit caption anchor has its own different parent. Resolved overlays
+mark derived boxes as `[split:Figure]`, `[split:Table]`, and so on; raw overlays
+intentionally continue to show the immutable merged Docling detection.
 
 Overlap handling is deliberately separate from physical layout filtering. Despite
 the compatibility module name, intersecting regions of every semantic class are

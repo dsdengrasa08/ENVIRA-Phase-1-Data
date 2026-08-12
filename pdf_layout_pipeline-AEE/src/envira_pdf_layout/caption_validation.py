@@ -159,6 +159,52 @@ def _parent_score(segment, object_type, parent, page, config):
     return score
 
 
+def _implicit_leading_anchor(
+    lines: list[CaptionLine],
+    anchors: list[tuple[int, str, str | None]],
+    parents: list[LayoutRegion],
+    page: dict[str, Any],
+    config: CaptionValidationConfig,
+) -> tuple[int, str, None] | None:
+    """Infer a missing first label only from strong independent object geometry.
+
+    PDF extraction can omit a small bold/italic ``Fig. N`` span even though the
+    detector correctly classified the enclosing region as Caption.  A later
+    explicit anchor must still exist, and the leading lines must have a positive,
+    type-compatible parent which differs from that later anchor's best parent.
+    This is deliberately not a text-keyword fallback.
+    """
+    if not anchors or anchors[0][0] <= 0:
+        return None
+    leading_box = _union(lines[: anchors[0][0]])
+    scored = []
+    for parent in parents:
+        parent_type = str(parent.get("type") or "")
+        object_type = "Formula" if parent_type == "Equation" else parent_type
+        score = _parent_score(leading_box, object_type, parent, page, config)
+        if score is not None and score > 0:
+            scored.append((score, object_type, parent))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    _, object_type, parent = scored[0]
+
+    later_index, later_type, _ = anchors[0]
+    later_box = _union(lines[later_index:])
+    later = [
+        (score, candidate)
+        for candidate in parents
+        if (score := _parent_score(later_box, later_type, candidate, page, config))
+        is not None
+    ]
+    later.sort(key=lambda item: item[0], reverse=True)
+    if not later or later[0][0] <= 0:
+        return None
+    if str(parent["layout_region_id"]) == str(later[0][1]["layout_region_id"]):
+        return None
+    return (0, object_type, None)
+
+
 def validate_and_segment_captions(
     regions: list[LayoutRegion],
     pages: list[dict[str, Any]],
@@ -199,7 +245,7 @@ def validate_and_segment_captions(
         if not lines and line_provider and len(nearby_assets) >= 2:
             # Selective OCR/GLM adapters plug in here and must return line boxes.
             lines = line_provider(region, page)
-        anchors = []
+        anchors: list[tuple[int, str, str | None]] = []
         for index, line in enumerate(lines):
             for object_type, pattern in patterns:
                 match = pattern.match(line.text)
@@ -207,6 +253,14 @@ def validate_and_segment_captions(
                     anchors.append((index, object_type, match.group("label")))
                     break
         source_id = str(region["layout_region_id"])
+        parents = [
+            candidate
+            for candidate in by_page[int(region["page_number"])]
+            if candidate.get("type") in {"Figure", "Table", "Formula", "Equation"}
+        ]
+        implicit = _implicit_leading_anchor(lines, anchors, parents, page, config)
+        if implicit:
+            anchors.insert(0, implicit)
         if len(anchors) < 2 or anchors[0][0] != 0:
             kept = deepcopy(region)
             kept["caption_validation_status"] = (
@@ -234,11 +288,6 @@ def validate_and_segment_captions(
             if len(member_lines) < config.min_segment_lines:
                 continue
             bbox = _union(member_lines)
-            parents = [
-                r
-                for r in by_page[int(region["page_number"])]
-                if r.get("type") in {"Figure", "Table", "Formula", "Equation"}
-            ]
             scored = [
                 (score, p)
                 for p in parents
@@ -275,7 +324,12 @@ def validate_and_segment_captions(
             "split_score": round(split_score, 4),
             "null_score": round(null_score, 4),
             "anchors": [
-                {"line_index": a[0], "object_type": a[1], "label": a[2]}
+                {
+                    "line_index": a[0],
+                    "object_type": a[1],
+                    "label": a[2],
+                    "implicit": a[2] is None,
+                }
                 for a in anchors
             ],
             "text_source": sorted({line.source for line in lines}),

@@ -167,3 +167,28 @@ def test_structured_ocr_provider_is_selective_and_can_supply_split_geometry():
     assert calls == [("caption", 1)]
     assert decisions[0]["action"] == "split"
     assert len([item for item in resolved if item.get("derived_from_region_id")]) == 2
+
+
+def test_missing_leading_identifier_can_be_inferred_from_distinct_parent_geometry():
+    """Small styled figure labels may be absent from native PDF line extraction."""
+    regions = [
+        region("figure", "Figure", [100, 100, 800, 400]),
+        region(
+            "caption",
+            "Caption",
+            [100, 405, 800, 510],
+            lines=[
+                ("Seasonal variations of daily precipitation.", [100, 405, 800, 445]),
+                ("Table 2. Field treatment establishment.", [100, 465, 800, 505]),
+            ],
+        ),
+        region("table", "Table", [100, 515, 800, 900]),
+    ]
+
+    resolved, decisions, associations = validate_and_segment_captions(regions, PAGES)
+
+    segments = [item for item in resolved if item.get("derived_from_region_id")]
+    assert decisions[0]["action"] == "split"
+    assert decisions[0]["anchors"][0]["implicit"] is True
+    assert [item["caption_object_type"] for item in segments] == ["Figure", "Table"]
+    assert {edge["parent_region_id"] for edge in associations} == {"figure", "table"}

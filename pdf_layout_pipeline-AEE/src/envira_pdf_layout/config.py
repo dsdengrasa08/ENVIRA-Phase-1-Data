@@ -295,10 +295,12 @@ class PipelineConfig:
             raise ValueError("caption validation acceptance score must be non-negative")
         if self.caption_validation.split_margin < 0:
             raise ValueError("caption validation margin must be non-negative")
-        if not 0 <= self.caption_validation.max_parent_gap_page_ratio <= 1:
-            raise ValueError("caption validation parent gap ratio must be in [0, 1]")
+        if not 0 < self.caption_validation.max_parent_gap_page_ratio <= 1:
+            raise ValueError("caption validation parent gap ratio must be in (0, 1]")
         if not 0 <= self.caption_validation.min_parent_horizontal_overlap <= 1:
             raise ValueError("caption validation parent overlap must be in [0, 1]")
+        if self.caption_validation.min_segment_lines < 1:
+            raise ValueError("caption validation min_segment_lines must be positive")
         if not 0 < self.table_context.max_vertical_gap_page_ratio <= 1:
             raise ValueError("table context vertical gap ratio must be in (0, 1]")
         if not 0 <= self.table_context.min_horizontal_overlap_ratio <= 1:

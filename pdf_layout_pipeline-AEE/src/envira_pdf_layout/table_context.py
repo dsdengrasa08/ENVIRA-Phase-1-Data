@@ -352,6 +352,13 @@ def _caption_table_corridor_edge(
     text = str(candidate.get("text") or "").strip()
     if not text:
         return None
+    # The corridor may recover an ordinary Text continuation, but it must not
+    # swallow another independently identified caption merely because that
+    # caption is geometrically sandwiched between the table seed and body.
+    if candidate.get("caption_object_type") not in {None, "Table"}:
+        return None
+    if _NEW_OBJECT_RE.match(text) or _TABLE_LABEL_RE.match(text):
+        return None
 
     cb = list(map(float, candidate["bbox_px"]))
     sb = list(map(float, seed["bbox_px"]))
