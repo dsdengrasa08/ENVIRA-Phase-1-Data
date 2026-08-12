@@ -93,6 +93,15 @@ separate contiguous top-level and parent-local sequences. Explicit exports are
 `nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
 core-filtered physical input.
 
+General overlap resolution treats containment as observation only and emits
+`CONTAINMENT_CANDIDATE`; it never changes hierarchy emission. The hierarchy stage
+uses the shared typed containment thresholds, an explicit parent/child compatibility
+matrix, and explainable child-role inference. Text containment is classified as a
+duplicate, identifier fragment, or ambiguous text occlusion rather than container
+hierarchy. Unknown and incompatible combinations remain top-level, including a
+non-container covering only one child. Exactly one authoritative containment outcome
+per pair replaces the observational candidate in exported relationships.
+
 Caption-anchored figure completion is likewise proposal-based. The preserved image
 detector proposes geometry, then `figure_completion.py` validates caption confidence,
 growth, page bounds, newly captured regions, structural barriers, competing assets,

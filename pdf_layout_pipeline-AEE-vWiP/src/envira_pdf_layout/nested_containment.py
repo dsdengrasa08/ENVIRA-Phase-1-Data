@@ -7,11 +7,40 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from .config import ContainmentConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
 
 CONTAINER_TYPES = {"Figure", "Table", "List", "Form", "Key-value"}
 TEXT_TYPES = {"Text", "Title", "Section-header", "Caption", "Footnote", "Reference"}
+CONTAINMENT_POLICIES = {
+    "Figure": {
+        "compatible": {
+            "panel_label",
+            "figure_internal_text",
+            "formula",
+            "code",
+            "caption_identifier",
+        },
+        "invalid": {"body_paragraph", "section_heading", "table", "figure"},
+    },
+    "Table": {
+        "compatible": {"table_cell_text", "formula", "code", "table_note"},
+        "invalid": {"figure", "table", "section_heading"},
+    },
+    "List": {
+        "compatible": {"list_item", "list_text"},
+        "invalid": {"figure", "table", "section_heading"},
+    },
+    "Form": {
+        "compatible": {"form_field", "form_text", "key_value"},
+        "invalid": {"figure", "table", "section_heading"},
+    },
+    "Key-value": {
+        "compatible": {"form_field", "form_text", "key_value"},
+        "invalid": {"figure", "table", "section_heading"},
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -29,11 +58,19 @@ def containment_features(child: LayoutRegion, parent: LayoutRegion) -> dict[str,
     parent_bbox = tuple(map(float, parent["bbox_px"]))
     child_area, parent_area = bbox_area(child_bbox), bbox_area(parent_bbox)
     intersection = intersection_area(child_bbox, parent_bbox)
+    child_center = (
+        (child_bbox[0] + child_bbox[2]) / 2,
+        (child_bbox[1] + child_bbox[3]) / 2,
+    )
     return {
         "child_coverage": intersection / child_area if child_area else 0.0,
         "parent_coverage": intersection / parent_area if parent_area else 0.0,
         "child_area": child_area,
         "parent_area": parent_area,
+        "child_center_inside_parent": (
+            parent_bbox[0] <= child_center[0] <= parent_bbox[2]
+            and parent_bbox[1] <= child_center[1] <= parent_bbox[3]
+        ),
         "child_text_bearing": bool(
             str(child.get("text") or child.get("orig") or "").strip()
         ),
@@ -43,19 +80,117 @@ def containment_features(child: LayoutRegion, parent: LayoutRegion) -> dict[str,
         ),
         "source_bbox": list(child.get("source_bbox_px") or child["bbox_px"]),
         "parent_source_bbox": list(parent.get("source_bbox_px") or parent["bbox_px"]),
+        "text_relation": _text_relation(child, parent),
     }
 
 
+def _normalized_text(region: LayoutRegion) -> str:
+    return " ".join(
+        str(region.get("text") or region.get("orig") or "").casefold().split()
+    )
+
+
+def _text_relation(child: LayoutRegion, parent: LayoutRegion) -> str:
+    child_text, parent_text = _normalized_text(child), _normalized_text(parent)
+    if not child_text or not parent_text:
+        return "unavailable"
+    if child_text == parent_text:
+        return "equal"
+    if child_text in parent_text:
+        return "child_in_parent"
+    if parent_text in child_text:
+        return "parent_in_child"
+    return "different"
+
+
+def infer_child_role(
+    child: LayoutRegion, parent: LayoutRegion, config: ContainmentConfig
+) -> tuple[str, list[str]]:
+    """Infer an explainable local role before consulting the compatibility matrix."""
+    child_type, parent_type = (
+        str(child.get("type") or "Unknown"),
+        str(parent.get("type") or "Unknown"),
+    )
+    text = " ".join(str(child.get("text") or child.get("orig") or "").split())
+    evidence = [
+        f"child_type:{child_type}",
+        f"parent_type:{parent_type}",
+        f"text_chars:{len(text)}",
+    ]
+    if child_type in {"Formula", "Equation"}:
+        return "formula", evidence
+    if child_type == "Code":
+        return "code", evidence
+    if child_type in {"Title", "Section-header"}:
+        return "section_heading", evidence
+    if child_type == "Figure":
+        return "figure", evidence
+    if child_type == "Table":
+        return "table", evidence
+    if child_type in {
+        "Field-region",
+        "Field-heading",
+        "Field-item",
+        "Field-key",
+        "Field-value",
+    }:
+        return "form_field", evidence
+    if child_type == "Key-value":
+        return "key_value", evidence
+    if parent_type == "List" and child_type in {"List", "Text"}:
+        return ("list_item" if child_type == "List" else "list_text"), evidence
+    if parent_type in {"Form", "Key-value"} and child_type in {"Text", "List"}:
+        return "form_text", evidence
+    if child_type == "Caption":
+        if len(text) <= config.caption_identifier_max_chars:
+            return "caption_identifier", evidence
+        return "full_caption", evidence
+    if parent_type == "Figure" and child_type in {"Text", "Footnote", "Unknown"}:
+        if len(text) <= config.panel_label_max_chars:
+            return "panel_label", evidence
+        if len(text) >= config.body_paragraph_min_chars:
+            return "body_paragraph", evidence
+        return "figure_internal_text", evidence
+    if parent_type == "Table" and child_type == "Footnote":
+        return "table_note", evidence
+    if parent_type == "Table" and child_type in {"Text", "Unknown"}:
+        return "table_cell_text", evidence
+    if child_type in TEXT_TYPES:
+        return "body_paragraph" if len(
+            text
+        ) >= config.body_paragraph_min_chars else "text_fragment", evidence
+    return "unknown", evidence
+
+
 def analyze_nested_containment(
-    regions: list[LayoutRegion], *, threshold: float = 0.92
+    regions: list[LayoutRegion],
+    observations: list[dict[str, Any]] | None = None,
+    *,
+    config: ContainmentConfig | None = None,
 ) -> list[dict[str, Any]]:
     """Generate page-local proposals without removing or mutating any region."""
+    config = config or ContainmentConfig()
+    by_id = {str(region["layout_region_id"]): region for region in regions}
+    if observations is not None:
+        proposals = []
+        for relation in observations:
+            if relation.get("kind") != "CONTAINMENT_CANDIDATE":
+                continue
+            parent_id = str(relation["candidate_parent_region_id"])
+            child_id = str(relation["candidate_child_region_id"])
+            if parent_id not in by_id or child_id not in by_id:
+                continue
+            parent, child = by_id[parent_id], by_id[child_id]
+            proposals.append(
+                _proposal(child, parent, containment_features(child, parent))
+            )
+        return proposals
     by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
     for region in regions:
         by_page[int(region["page_number"])].append(region)
     proposals = []
     for page_number, page_regions in by_page.items():
-        parents = [r for r in page_regions if r.get("type") in CONTAINER_TYPES]
+        parents = page_regions
         for child in page_regions:
             child_id = str(child["layout_region_id"])
             for parent in parents:
@@ -63,43 +198,137 @@ def analyze_nested_containment(
                 if child_id == parent_id:
                     continue
                 features = containment_features(child, parent)
-                if features["child_coverage"] < threshold:
+                if not (
+                    features["child_coverage"] >= config.strong_child_coverage
+                    or (
+                        features["child_center_inside_parent"]
+                        and features["child_coverage"] >= config.center_child_coverage
+                    )
+                ):
                     continue
-                proposals.append(
-                    {
-                        "proposal_id": f"p{page_number}:{parent_id}:{child_id}",
-                        "page_number": page_number,
-                        "parent_region_id": parent_id,
-                        "child_region_id": child_id,
-                        "parent_type": parent.get("type"),
-                        "child_type": child.get("type"),
-                        "features": features,
-                        "previous_behavior": "would_have_been_excluded",
-                    }
-                )
+                if features["parent_area"] <= features["child_area"]:
+                    continue
+                proposals.append(_proposal(child, parent, features))
     return proposals
 
 
-def _classify(proposal: dict[str, Any]) -> tuple[str, str]:
+def _proposal(
+    child: LayoutRegion, parent: LayoutRegion, features: dict[str, Any]
+) -> dict[str, Any]:
+    page_number = int(child["page_number"])
+    parent_id, child_id = (
+        str(parent["layout_region_id"]),
+        str(child["layout_region_id"]),
+    )
+    return {
+        "proposal_id": f"p{page_number}:{parent_id}:{child_id}",
+        "page_number": page_number,
+        "parent_region_id": parent_id,
+        "child_region_id": child_id,
+        "parent_type": parent.get("type"),
+        "child_type": child.get("type"),
+        "features": features,
+        "previous_behavior": "would_have_been_excluded",
+    }
+
+
+def _classify(
+    proposal: dict[str, Any],
+    child: LayoutRegion,
+    parent: LayoutRegion,
+    config: ContainmentConfig,
+) -> tuple[str, str, str, list[str]]:
     parent_type, child_type = proposal["parent_type"], proposal["child_type"]
     features = proposal["features"]
+    role, role_evidence = infer_child_role(child, parent, config)
+    child_parent_ratio = features["child_area"] / max(features["parent_area"], 1.0)
+    if child_parent_ratio > config.max_child_parent_area_ratio:
+        return (
+            "AMBIGUOUS_CONTAINMENT",
+            "child_too_large_for_parent",
+            role,
+            role_evidence,
+        )
     if parent_type not in CONTAINER_TYPES:
-        return "INVALID_OCCLUSION", "parent_not_container_capable"
-    if child_type in CONTAINER_TYPES:
-        return "AMBIGUOUS_CONTAINMENT", "nested_container_requires_review"
+        relation = proposal["features"].get("text_relation")
+        if parent_type in TEXT_TYPES and child_type in TEXT_TYPES:
+            if parent_type in {"Title", "Section-header"} and child_type == "Text":
+                return (
+                    "INVALID_OCCLUSION",
+                    "heading_covers_body_text",
+                    role,
+                    role_evidence,
+                )
+            if relation == "equal":
+                return "DUPLICATE", "equal_text_containment", role, role_evidence
+            if parent_type == "Caption" and role in {
+                "text_fragment",
+                "caption_identifier",
+            }:
+                return (
+                    "IDENTIFIER_FRAGMENT",
+                    "caption_contains_identifier_fragment",
+                    role,
+                    role_evidence,
+                )
+            return (
+                "AMBIGUOUS_TEXT_OCCLUSION",
+                "text_container_not_hierarchy_capable",
+                role,
+                role_evidence,
+            )
+        if parent_type == "Unknown":
+            return (
+                "AMBIGUOUS_CONTAINMENT",
+                "unknown_parent_capability",
+                role,
+                role_evidence,
+            )
+        return "INVALID_OCCLUSION", "parent_not_container_capable", role, role_evidence
     if features["parent_figure_completed"] and child_type in TEXT_TYPES:
-        return "AMBIGUOUS_CONTAINMENT", "expanded_asset_captures_text"
-    if parent_type == "List" and child_type != "List":
-        return "AMBIGUOUS_CONTAINMENT", "list_child_role_incompatible"
-    return "NESTED_CHILD", "compatible_container_containment"
+        return (
+            "AMBIGUOUS_CONTAINMENT",
+            "expanded_asset_captures_text",
+            role,
+            role_evidence,
+        )
+    policy = CONTAINMENT_POLICIES[parent_type]
+    if (
+        parent_type == "Table"
+        and role == "table_note"
+        and features["child_coverage"] < config.strong_child_coverage
+    ):
+        return (
+            "AMBIGUOUS_CONTAINMENT",
+            "table_note_not_strongly_contained",
+            role,
+            role_evidence,
+        )
+    if role in policy["compatible"]:
+        return "NESTED_CHILD", "compatible_container_child_role", role, role_evidence
+    if role in policy["invalid"]:
+        return (
+            "INVALID_OCCLUSION",
+            "incompatible_container_child_role",
+            role,
+            role_evidence,
+        )
+    return (
+        "AMBIGUOUS_CONTAINMENT",
+        "unrecognized_container_child_role",
+        role,
+        role_evidence,
+    )
 
 
 def resolve_nested_hierarchy(
     regions: list[LayoutRegion],
     proposals: list[dict[str, Any]] | None = None,
+    config: ContainmentConfig | None = None,
 ) -> HierarchyResult:
     """Resolve proposals once, retaining ambiguous candidates at top level."""
     working = deepcopy(regions)
+    config = config or ContainmentConfig()
     for region in working:
         for key in (
             "nested_parent_region_ids",
@@ -131,8 +360,19 @@ def resolve_nested_hierarchy(
                 {**proposal, "action": "reject", "reason": "cross_page_hierarchy"}
             )
             continue
-        kind, reason = _classify(proposal)
-        candidates_by_child[child_id].append((proposal, kind, reason))
+        kind, reason, role, role_evidence = _classify(
+            proposal, by_id[child_id], by_id[parent_id], config
+        )
+        enriched = {
+            **proposal,
+            "inferred_child_role": role,
+            "role_evidence": role_evidence,
+            "policy_rule": f"{proposal['parent_type']}:{role}:{kind}",
+            "figure_completion_involved": bool(
+                proposal["features"].get("parent_figure_completed")
+            ),
+        }
+        candidates_by_child[child_id].append((enriched, kind, reason))
 
     accepted_parent: dict[str, str] = {}
     for child_id, alternatives in candidates_by_child.items():

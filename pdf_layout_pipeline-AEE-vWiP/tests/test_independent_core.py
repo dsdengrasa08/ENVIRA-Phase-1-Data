@@ -90,3 +90,10 @@ def test_compatibility_entry_point_delegates_to_independent_core(monkeypatch):
 def test_independent_core_is_importable_without_reference_notebook():
     assert callable(independent_core.run_independent_core)
     assert callable(pipeline.run_layout_pipeline)
+
+
+def test_overlap_containment_is_observational_only():
+    source = (PACKAGE / "layout_overlap.py").read_text(encoding="utf-8")
+    assert 'return "CONTAINMENT_CANDIDATE"' in source
+    assert "LEGITIMATE_CONTAINMENT" not in source
+    assert 'region["nested_parent_region_ids"]' not in source

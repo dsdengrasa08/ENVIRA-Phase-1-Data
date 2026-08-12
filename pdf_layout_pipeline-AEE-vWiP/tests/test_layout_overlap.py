@@ -68,7 +68,7 @@ def test_cross_class_near_identical_regions_are_flagged_not_deleted():
     assert all(r["resolution_status"] == "ambiguous" for r in result.regions)
 
 
-def test_asset_containment_is_hierarchy_not_suppression():
+def test_asset_containment_is_observational_and_does_not_mutate_emission():
     result = resolve_layout_overlaps(
         [
             region("figure", "Figure", [100, 100, 800, 700], order=1),
@@ -77,14 +77,14 @@ def test_asset_containment_is_hierarchy_not_suppression():
         PAGES,
     )
     by_id = {r["layout_region_id"]: r for r in result.regions}
-    assert by_id["label"]["nested_parent_region_ids"] == ["figure"]
-    assert by_id["label"]["emission_policy"] == "emit_as_nested_child"
-    assert by_id["label"]["parent_local_reading_order"] == 1
-    assert by_id["label"]["resolved_reading_order"] is None
-    assert by_id["figure"]["nested_child_region_ids"] == ["label"]
+    assert result.relationships[0]["kind"] == "CONTAINMENT_CANDIDATE"
+    assert result.relationships[0]["candidate_parent_region_id"] == "figure"
+    assert result.relationships[0]["candidate_child_region_id"] == "label"
+    assert by_id["label"]["emission_policy"] == "emit_canonical"
+    assert "nested_parent_region_ids" not in by_id["label"]
 
 
-def test_non_container_covering_several_regions_is_invalid_occlusion():
+def test_non_container_containment_remains_observational_for_hierarchy_policy():
     result = resolve_layout_overlaps(
         [
             region("oversized", "Text", [50, 50, 900, 900], "bad"),
@@ -93,9 +93,9 @@ def test_non_container_covering_several_regions_is_invalid_occlusion():
         ],
         PAGES,
     )
-    assert {r["kind"] for r in result.relationships} == {"INVALID_OCCLUSION"}
+    assert {r["kind"] for r in result.relationships} == {"CONTAINMENT_CANDIDATE"}
     assert len(result.regions) == 3
-    assert next(r for r in result.regions if r["layout_region_id"] == "oversized")["resolution_status"] == "ambiguous"
+    assert all(r["emission_policy"] == "emit_canonical" for r in result.regions)
 
 
 def test_nearby_aligned_text_is_fragment_candidate_without_physical_merge():
@@ -129,7 +129,10 @@ def test_duplicate_chain_requires_complete_link_consistency():
     assert len(result.regions) == 3
     duplicate_relations = [r for r in result.relationships if r["kind"] == "DUPLICATE"]
     assert len(duplicate_relations) == 2
-    assert all(r["status"] == "retained_nontransitive_duplicate_chain" for r in duplicate_relations)
+    assert all(
+        r["status"] == "retained_nontransitive_duplicate_chain"
+        for r in duplicate_relations
+    )
 
 
 def test_caption_association_supports_figures_and_preserves_ambiguity():

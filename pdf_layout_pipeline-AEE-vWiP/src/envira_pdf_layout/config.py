@@ -212,11 +212,22 @@ class OverlapResolutionConfig:
     duplicate_iou: float = 0.90
     duplicate_edge_page_ratio: float = 0.003
     duplicate_area_ratio: float = 0.85
-    nested_containment: float = 0.92
     fragment_horizontal_overlap: float = 0.50
     fragment_max_gap_page_ratio: float = 0.012
     boundary_overlap_ratio: float = 0.20
     preserve_authoritative_nested_regions: bool = True
+
+
+@dataclass(frozen=True)
+class ContainmentConfig:
+    """Single source of thresholds for observational containment and hierarchy."""
+
+    strong_child_coverage: float = 0.92
+    center_child_coverage: float = 0.72
+    max_child_parent_area_ratio: float = 0.85
+    panel_label_max_chars: int = 12
+    body_paragraph_min_chars: int = 80
+    caption_identifier_max_chars: int = 24
 
 
 @dataclass(frozen=True)
@@ -268,6 +279,7 @@ class PipelineConfig:
     overlap_resolution: OverlapResolutionConfig = field(
         default_factory=OverlapResolutionConfig
     )
+    containment: ContainmentConfig = field(default_factory=ContainmentConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
     content_policy: ContentPolicyConfig = field(default_factory=ContentPolicyConfig)
@@ -300,6 +312,7 @@ class PipelineConfig:
             "table_context": TableContextConfig,
             "caption_overlap": CaptionOverlapConfig,
             "overlap_resolution": OverlapResolutionConfig,
+            "containment": ContainmentConfig,
             "export": ExportConfig,
             "heuristics": HeuristicProfileConfig,
             "content_policy": ContentPolicyConfig,
@@ -569,7 +582,6 @@ class PipelineConfig:
         for name in (
             "duplicate_iou",
             "duplicate_area_ratio",
-            "nested_containment",
             "fragment_horizontal_overlap",
             "boundary_overlap_ratio",
         ):
@@ -578,3 +590,17 @@ class PipelineConfig:
         for name in ("duplicate_edge_page_ratio", "fragment_max_gap_page_ratio"):
             if getattr(generalized, name) < 0:
                 raise ValueError(f"overlap resolution {name} must be non-negative")
+        for name in (
+            "strong_child_coverage",
+            "center_child_coverage",
+            "max_child_parent_area_ratio",
+        ):
+            if not 0 <= getattr(self.containment, name) <= 1:
+                raise ValueError(f"containment {name} must be in [0, 1]")
+        for name in (
+            "panel_label_max_chars",
+            "body_paragraph_min_chars",
+            "caption_identifier_max_chars",
+        ):
+            if getattr(self.containment, name) < 1:
+                raise ValueError(f"containment {name} must be positive")

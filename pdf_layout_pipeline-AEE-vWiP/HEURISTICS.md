@@ -17,6 +17,8 @@ filenames, hashes, or document-specific exceptions.
 | Document tail | Secondary stream | conclusion/back-matter headings, sequence and page position | scholarly structure and English lexical | yes | confidence threshold and column reconciliation |
 | Content policy | Retain/secondary | semantic section category selected by consumer | consumer policy | no layout deletion | excluded content remains auditable |
 | Table/caption association | Associate | detector class, geometry, order, optional English prefixes | generic structure and language lexical | no | ambiguous candidates remain unattached |
+| Containment observation | Observe only | shared strong/center coverage thresholds | generic geometry | no | cannot alter emission or reading order |
+| Hierarchy policy | Accept/flag | parent compatibility matrix and inferred child role | generic structure | only compatible children become nested | unknown, invalid, and ambiguous roles remain top-level |
 
 ## Evidence categories
 
@@ -32,3 +34,13 @@ Unknown document families retain ambiguous content. Publisher lexical evidence i
 non-destructive in `disabled` and `evidence_only` modes and confirmatory by default.
 Valid semantic back matter is retained in the secondary excluded stream unless the
 content policy explicitly restores it to the main stream.
+
+## Containment policy
+
+`layout_overlap.py` emits only `CONTAINMENT_CANDIDATE` observations. The authoritative
+resolver infers roles such as panel label, figure-internal text, table-cell text,
+table note, form field, list item, body paragraph, and caption identifier, then applies
+the declarative matrix in `nested_containment.py`. Text-to-text containment is routed
+to duplicate/identifier-fragment/ambiguous-occlusion outcomes and never establishes
+container hierarchy. One shared `containment` configuration section supplies geometry
+and role thresholds.

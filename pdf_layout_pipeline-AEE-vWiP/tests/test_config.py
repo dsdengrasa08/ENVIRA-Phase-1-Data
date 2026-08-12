@@ -1,6 +1,7 @@
 from pathlib import Path
 import pytest
 from envira_pdf_layout.config import (
+    ContainmentConfig,
     DocumentConfig,
     OverlapResolutionConfig,
     PipelineConfig,
@@ -158,3 +159,10 @@ def test_unknown_publisher_profile_is_rejected():
 def test_invalid_figure_completion_limits_are_rejected():
     with pytest.raises(ValueError, match="area_multiplier"):
         PipelineConfig.load(environ={}, figures={"max_completion_area_multiplier": 0.5})
+
+
+def test_invalid_shared_containment_threshold_is_rejected():
+    with pytest.raises(ValueError, match="containment strong_child_coverage"):
+        PipelineConfig(
+            containment=ContainmentConfig(strong_child_coverage=1.1)
+        ).validate()

@@ -32,30 +32,38 @@ def run_layout_pipeline(conversion, page_set, config):
     }
     resolution_input = list(result.final_regions)
     resolution = resolve_layout_overlaps(
-        resolution_input, result.pages, config.overlap_resolution
+        resolution_input,
+        result.pages,
+        config.overlap_resolution,
+        config.containment,
     )
     result.resolved_regions = resolution.regions
     result.layout_relationships = list(resolution.relationships)
-    # Backward-compatible name used by notebook caption inspection.  The value
-    # now contains the complete geometric, class-aware relationship graph.
-    result.caption_overlap_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
-    proposals = analyze_nested_containment(result.resolved_regions)
-    hierarchy = resolve_nested_hierarchy(result.resolved_regions, proposals)
+    proposals = analyze_nested_containment(
+        result.resolved_regions,
+        result.layout_relationships,
+        config=config.containment,
+    )
+    hierarchy = resolve_nested_hierarchy(
+        result.resolved_regions, proposals, config.containment
+    )
     result.resolved_regions = hierarchy.regions
     result.physical_regions = hierarchy.regions
     result.top_level_regions = hierarchy.top_level_regions
     result.nested_regions = hierarchy.nested_regions
-    # General overlap still observes containment, but only the hierarchy resolver
-    # is authoritative for parent/child emission.
+    # Replace observational candidates with exactly one authoritative outcome.
     result.layout_relationships = [
         relation
         for relation in result.layout_relationships
-        if relation.get("kind") != "LEGITIMATE_CONTAINMENT"
+        if relation.get("kind") != "CONTAINMENT_CANDIDATE"
     ]
     result.layout_relationships.extend(hierarchy.relationships)
     result.resolution_decisions.extend(hierarchy.decisions)
+    # Backward-compatible caption inspection now receives authoritative rather
+    # than provisional containment outcomes.
+    result.caption_overlap_relationships = list(result.layout_relationships)
     semantic_associations = associate_attachable_context(
         result.resolved_regions, result.pages
     )
