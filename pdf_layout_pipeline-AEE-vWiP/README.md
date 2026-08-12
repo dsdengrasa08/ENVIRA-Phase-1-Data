@@ -9,8 +9,8 @@ directory is required to import, test, or run the pipeline.
 
 ### Colab
 
-Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, run the optional
-installation cell, and execute top to bottom. Google Drive and model paths support
+Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, select the YAML
+configuration profile, run the optional installation cell, and execute top to bottom. Google Drive and model paths support
 the documented `PHASE1_*` environment-variable overrides.
 
 ### Local/server
@@ -33,15 +33,19 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `independent_core.py`: package-owned extraction of the established item
-  conversion, page-1 recovery, filters, asset recovery, reading order, and output
-  construction. Its preserved stage ordering is the production implementation.
+- `independent_core.py`: package-owned orchestration of the remaining established
+  page-1 recovery, filters, asset recovery, reading order, and output construction.
+  Its preserved stage ordering remains the production implementation while stages
+  are migrated incrementally under equivalence tests.
 - `authoritative.py`: compatibility alias for callers using the former entry point;
   it delegates directly to the independent package core and does not load a
   notebook.
-- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: smaller
-  independently testable compatibility helpers; the production core retains the
-  complete established heuristics in `independent_core.py`.
+- `region_conversion.py`: the active Docling-to-ENVIRA conversion boundary. It
+  supports object and serialized Docling documents, preserves production IDs and
+  fields, and reports skipped provenance explicitly.
+- `filtering/`, `assets/`, `reading_order.py`: smaller independently testable
+  compatibility helpers. Until each is migrated under equivalence tests, the
+  corresponding established production heuristic remains in `independent_core.py`.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
@@ -78,6 +82,25 @@ relationships, action decisions, and suppressed source detections are exported
 as separate JSONL artifacts. The workflow provides a resolution overlay showing
 source geometry, resolved geometry, suppressed detections, hierarchy arrows, and
 unresolved conflicts.
+
+Nested asset handling is non-destructive. Figure/table containment is proposed in
+the core, then validated once after duplicate resolution. Only semantically
+compatible children with one unambiguous container receive nested emission;
+expanded figures that newly capture text, nested containers, and competing parents
+remain top-level conflicts. Reading order is assigned after hierarchy acceptance as
+separate contiguous top-level and parent-local sequences. Explicit exports are
+`physical_layout_regions.jsonl`, `top_level_layout_regions.jsonl`, and
+`nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
+core-filtered physical input.
+
+Caption-anchored figure completion is likewise proposal-based. The preserved image
+detector proposes geometry, then `figure_completion.py` validates caption confidence,
+growth, page bounds, newly captured regions, structural barriers, competing assets,
+and column-gutter crossings before downstream filtering. Rejected and ambiguous
+proposals restore detector geometry. Every proposal preserves source, proposed,
+resolved, visual-crop, and semantic-group boxes plus deterministic geometry history.
+Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
+with a source/proposal/barrier overlay in the workflow notebook.
 
 ## Logical table context
 
@@ -171,3 +194,27 @@ change, compare a fixed reference run against the original notebook for:
 6. overlay dimensions, labels, geometry, and representative visual diffs.
 
 Algorithmic cleanup should be committed separately from output-equivalence work.
+
+## Configuration precedence
+
+`PipelineConfig.load()` is the authoritative loader. Values are merged in the
+following order: typed defaults, the selected YAML profile, `PHASE1_*` environment
+variables, and explicit notebook/CLI overrides. Unknown YAML sections and fields are
+rejected. The complete effective configuration, its profile path, value provenance,
+and the captured legacy-core environment are written to `effective_config.json`.
+`PipelineConfig.from_env()` remains a compatibility wrapper around the same loader.
+The preserved core executes against the captured configuration snapshot with ambient
+`PHASE1_*` variables isolated for reproducible runs.
+
+## Generalized heuristic policy
+
+Publisher vocabulary is stored in named data profiles rather than embedded in
+destructive filter conditions. The default `confirmatory` mode requires publisher
+lexical evidence to agree with generic page geometry and title/body structure;
+`evidence_only` records matches without changing output. A conservative document-
+family classifier reports its signals and falls back to `unknown`. Evidence,
+document-family signals, and content-policy decisions are exported in
+`pipeline_diagnostics.json`. Consumer choices
+for references, acknowledgements, declarations, appendices, supplementary sections,
+and front matter are configured separately from layout-noise correction. See
+`HEURISTICS.md` for the active destructive-rule inventory and safeguards.
