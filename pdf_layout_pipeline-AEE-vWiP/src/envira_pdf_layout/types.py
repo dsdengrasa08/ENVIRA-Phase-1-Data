@@ -32,6 +32,7 @@ class ArtifactPaths:
     layout_relationships_jsonl: Path
     resolution_decisions_jsonl: Path
     suppressed_regions_jsonl: Path
+    effective_config_json: Path
     summary_csv: Path
 
 
