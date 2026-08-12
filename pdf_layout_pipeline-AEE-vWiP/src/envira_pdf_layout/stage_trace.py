@@ -10,6 +10,8 @@ from typing import Any
 
 from .types import LayoutRegion
 
+TRACE_SCHEMA_VERSION = 1
+
 
 def snapshot(
     stage: str,
@@ -73,6 +75,7 @@ def snapshot(
         json.dumps(signatures, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
     return {
+        "trace_schema_version": TRACE_SCHEMA_VERSION,
         "stage": stage,
         "status": status,
         "elapsed_ms": round(elapsed_ms, 3) if elapsed_ms is not None else None,
@@ -104,7 +107,8 @@ def validate_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
     failures = [
         {"stage": row["stage"], "invariants": row["invariants"]}
         for row in trace
-        if row.get("status") != "completed"
+        if row.get("trace_schema_version") != TRACE_SCHEMA_VERSION
+        or row.get("status") != "completed"
         or any(value is False for value in row["invariants"].values())
     ]
     return {
@@ -114,6 +118,68 @@ def validate_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
             sum(row.get("elapsed_ms") or 0.0 for row in trace), 3
         ),
         "failures": failures,
+    }
+
+
+def compare_stage_traces(
+    baseline: list[dict[str, Any]], candidate: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Return the first semantic divergence between two exported traces."""
+    baseline_by_stage = {row["stage"]: row for row in baseline}
+    candidate_by_stage = {row["stage"]: row for row in candidate}
+    ordered = [row["stage"] for row in baseline]
+    missing = [stage for stage in ordered if stage not in candidate_by_stage]
+    unexpected = [
+        stage for stage in candidate_by_stage if stage not in baseline_by_stage
+    ]
+    differences = []
+    for stage in ordered:
+        if stage not in candidate_by_stage:
+            continue
+        left, right = baseline_by_stage[stage], candidate_by_stage[stage]
+        if left.get("trace_schema_version") != right.get("trace_schema_version"):
+            differences.append({"stage": stage, "reason": "schema_version"})
+            continue
+        if left.get("region_digest") == right.get("region_digest"):
+            continue
+        left_signatures, right_signatures = (
+            left.get("region_signatures", {}),
+            right.get("region_signatures", {}),
+        )
+        shared = set(left_signatures) & set(right_signatures)
+        differences.append(
+            {
+                "stage": stage,
+                "reason": "region_digest",
+                "baseline_digest": left.get("region_digest"),
+                "candidate_digest": right.get("region_digest"),
+                "added_region_ids": sorted(
+                    set(right_signatures) - set(left_signatures)
+                ),
+                "removed_region_ids": sorted(
+                    set(left_signatures) - set(right_signatures)
+                ),
+                "geometry_changed_region_ids": sorted(
+                    rid
+                    for rid in shared
+                    if left_signatures[rid].get("bbox_px")
+                    != right_signatures[rid].get("bbox_px")
+                ),
+                "type_changed_region_ids": sorted(
+                    rid
+                    for rid in shared
+                    if left_signatures[rid].get("type")
+                    != right_signatures[rid].get("type")
+                ),
+            }
+        )
+    compatible = not missing and not unexpected and not differences
+    return {
+        "compatible": compatible,
+        "first_divergent_stage": differences[0]["stage"] if differences else None,
+        "missing_stages": missing,
+        "unexpected_stages": unexpected,
+        "differences": differences,
     }
 
 

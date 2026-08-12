@@ -71,6 +71,24 @@ Geometry-heavy stages publish deterministic work counters alongside elapsed time
 Overlap observations are reused by hierarchy policy, and the shared region index
 prevents repeated page/type/text indexing without introducing a mutable global cache.
 
+## Regression contracts
+
+Fast synthetic regression fixtures live under `tests/fixtures/regression` and use
+versioned semantic expectations rather than pixel-perfect screenshots. Stage traces
+carry a schema version and can be compared with
+`python -m envira_pdf_layout.regression compare BASELINE CANDIDATE`. Golden updates
+require an explicit fixture and reason and refuse invalid traces by default. Use
+`constraints-regression.txt` for reproducible model-backed or scheduled corpus runs;
+the default pull-request suite remains model-free. Export validation checks required
+artifacts, hierarchy partitions, relationship endpoints, unresolved containment,
+and trace schema compatibility.
+
+Test tiers are registered in `pytest.ini`: run `pytest -m regression` for the
+generated semantic fixtures, `pytest -m performance` for deterministic work
+contracts, and reserve `pytest -m model` for scheduled/model-backed environments.
+Committed fixtures are repository-generated JSON contracts and contain no
+third-party PDF content; private evaluation PDFs should remain in private CI jobs.
+
 ## Generalized overlap resolution
 
 The maintained pipeline resolves overlaps after the preserved core filters and

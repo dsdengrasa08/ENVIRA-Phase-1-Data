@@ -3,6 +3,10 @@ from envira_pdf_layout.config import CaptionAssociationConfig, ContainmentConfig
 from envira_pdf_layout.layout_overlap import resolve_layout_overlaps
 from envira_pdf_layout.nested_containment import analyze_nested_containment
 from envira_pdf_layout.region_index import RegionIndex
+import random
+import pytest
+
+pytestmark = pytest.mark.performance
 
 
 PAGES = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
@@ -49,3 +53,17 @@ def test_shared_index_preserves_caption_results():
         regions, PAGES, config=config, index=RegionIndex.build(regions, PAGES)
     )
     assert indexed == ordinary
+
+
+def test_caption_association_is_deterministic_under_input_permutations():
+    regions = [
+        region("left", "Figure", [50, 100, 450, 300]),
+        region("right", "Figure", [550, 100, 950, 300]),
+        region("caption", "Caption", [50, 305, 950, 340], "Figure 1. Test"),
+    ]
+    expected = associate_captions(regions, PAGES)
+    rng = random.Random(11)
+    for _ in range(10):
+        shuffled = list(regions)
+        rng.shuffle(shuffled)
+        assert associate_captions(shuffled, PAGES) == expected

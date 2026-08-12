@@ -1,4 +1,4 @@
-from envira_pdf_layout.stage_trace import snapshot, validate_trace
+from envira_pdf_layout.stage_trace import compare_stage_traces, snapshot, validate_trace
 
 
 def region(region_id, typ="Text", bbox=None, page=1):
@@ -64,3 +64,22 @@ def test_missing_identity_page_and_nonfinite_geometry_are_reported_not_crashed()
     assert not broken["invariants"]["all_region_ids_present"]
     assert not broken["invariants"]["valid_page_numbers"]
     assert not broken["invariants"]["valid_geometry"]
+
+
+def test_trace_comparison_reports_first_semantic_divergence():
+    baseline = [snapshot("core", [region("a")]), snapshot("final", [region("a")])]
+    candidate = [
+        snapshot("core", [region("a")]),
+        snapshot("final", [region("a", typ="Caption")]),
+    ]
+    comparison = compare_stage_traces(baseline, candidate)
+    assert not comparison["compatible"]
+    assert comparison["first_divergent_stage"] == "final"
+    assert comparison["differences"][0]["type_changed_region_ids"] == ["a"]
+
+
+def test_trace_comparison_ignores_runtime_only_changes():
+    assert compare_stage_traces(
+        [snapshot("core", [region("a")], elapsed_ms=1)],
+        [snapshot("core", [region("a")], elapsed_ms=999)],
+    )["compatible"]

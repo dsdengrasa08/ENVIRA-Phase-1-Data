@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+import platform
 from time import perf_counter
 
 from .caption_overlap import build_caption_groups
 from .caption_association import associate_captions
+from .artifact_validation import validate_relationship_graph
 from .independent_core import run_independent_core
 from .layout_overlap import resolve_layout_overlaps
 from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
@@ -40,6 +42,11 @@ def run_layout_pipeline(conversion, page_set, config):
             region.get("score") is not None for region in result.raw_regions
         ),
         "nms_configuration": "not_exposed_by_pipeline",
+        "python_version": platform.python_version(),
+        "dependency_versions": {
+            package: _package_version(package)
+            for package in ("PyMuPDF", "numpy", "opencv-python-headless", "pandas")
+        },
     }
     resolution_input = list(result.final_regions)
     started = perf_counter()
@@ -226,9 +233,21 @@ def run_layout_pipeline(conversion, page_set, config):
     final_snapshot["caption_group_count"] = len(result.caption_groups)
     final_snapshot["table_context_elapsed_ms"] = round(table_elapsed_ms, 3)
     final_snapshot["caption_grouping_elapsed_ms"] = round(caption_group_elapsed_ms, 3)
+    graph_validation = validate_relationship_graph(
+        result.resolved_regions, result.layout_relationships
+    )
+    final_snapshot["invariants"]["relationship_graph_valid"] = graph_validation["valid"]
     result.stage_trace.append(final_snapshot)
+    result.diagnostics["relationship_graph_validation"] = graph_validation
     result.diagnostics["stage_trace"] = {
         "validation": validate_trace(result.stage_trace),
         "stages": result.stage_trace,
     }
     return result
+
+
+def _package_version(package: str) -> str:
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return "unknown"
