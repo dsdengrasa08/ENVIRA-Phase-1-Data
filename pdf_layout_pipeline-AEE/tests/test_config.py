@@ -61,3 +61,11 @@ def test_invalid_caption_validation_controls():
         PipelineConfig(
             caption_validation=CaptionValidationConfig(min_segment_lines=0)
         ).validate()
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            caption_validation=CaptionValidationConfig(provider_quality_threshold=1.1)
+        ).validate()
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            caption_validation=CaptionValidationConfig(parent_ambiguity_margin=-0.1)
+        ).validate()

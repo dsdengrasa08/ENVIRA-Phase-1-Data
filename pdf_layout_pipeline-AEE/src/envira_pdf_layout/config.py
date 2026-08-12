@@ -165,6 +165,20 @@ class CaptionValidationConfig:
         ("Algorithm", ("algorithm",)),
         ("Listing", ("listing",)),
     )
+    parent_types: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("Figure", ("Figure",)),
+        ("Table", ("Table",)),
+        ("Formula", ("Formula", "Equation")),
+        ("Algorithm", ("Algorithm",)),
+        ("Listing", ("Listing", "Code")),
+    )
+    preferred_directions: tuple[tuple[str, str], ...] = (
+        ("Figure", "below"),
+        ("Table", "above"),
+        ("Formula", "either"),
+        ("Algorithm", "above"),
+        ("Listing", "above"),
+    )
     split_acceptance_score: float = 6.0
     split_margin: float = 1.5
     review_score: float = 4.0
@@ -175,6 +189,12 @@ class CaptionValidationConfig:
     type_mismatch_penalty: float = 2.5
     min_segment_lines: int = 1
     use_pdf_text_lines: bool = True
+    use_selective_line_provider: bool = True
+    provider_quality_threshold: float = 0.55
+    parent_ambiguity_margin: float = 0.75
+    min_boundary_gap_line_ratio: float = 0.18
+    strong_boundary_gap_line_ratio: float = 0.55
+    max_line_outside_source_ratio: float = 0.15
 
 
 @dataclass(frozen=True)
@@ -301,6 +321,19 @@ class PipelineConfig:
             raise ValueError("caption validation parent overlap must be in [0, 1]")
         if self.caption_validation.min_segment_lines < 1:
             raise ValueError("caption validation min_segment_lines must be positive")
+        for name in (
+            "provider_quality_threshold",
+            "max_line_outside_source_ratio",
+        ):
+            if not 0 <= getattr(self.caption_validation, name) <= 1:
+                raise ValueError(f"caption validation {name} must be in [0, 1]")
+        for name in (
+            "parent_ambiguity_margin",
+            "min_boundary_gap_line_ratio",
+            "strong_boundary_gap_line_ratio",
+        ):
+            if getattr(self.caption_validation, name) < 0:
+                raise ValueError(f"caption validation {name} must be non-negative")
         if not 0 < self.table_context.max_vertical_gap_page_ratio <= 1:
             raise ValueError("table context vertical gap ratio must be in (0, 1]")
         if not 0 <= self.table_context.min_horizontal_overlap_ratio <= 1:
