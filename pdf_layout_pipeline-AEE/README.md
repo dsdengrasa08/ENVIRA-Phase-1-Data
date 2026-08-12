@@ -115,11 +115,18 @@ reserved on each page-local group for a later document-level continuation stage.
 
 Before caption-to-object association, merged-caption validation reuses native PDF
 lines or structured `text_lines`/`ocr_lines`; integrations may supply a structured
-OCR provider as a selective fallback. Prefixes at logical line starts only propose
-boundaries. A split is accepted only when every segment has a distinct,
-type-compatible nearby parent and the joint semantic-spatial score beats the
-unsplit hypothesis by a configured margin. Accepted segments preserve their source
-detector ID and box; ambiguous regions remain unchanged with auditable evidence.
+OCR provider as a selective fallback. Existing structured line geometry and
+typography are preserved at the Docling conversion boundary. The provider is used
+only for missing or low-quality line evidence, and its page-pixel boxes are checked
+against the immutable detector box. Prefixes at physical or inferred logical
+paragraph starts only propose boundaries. Relative line gaps, indentation resets,
+optional typography, OCR confidence, column compatibility, structural blockers,
+preferred caption direction, and configurable prefix-to-parent class mappings
+corroborate those proposals. A split is accepted only when every segment has a
+distinct, type-compatible nearby parent, each parent choice clears an ambiguity
+margin, and the joint semantic-spatial score beats the unsplit hypothesis by a
+configured margin. Accepted segments preserve their source detector ID and box;
+ambiguous regions remain unchanged with auditable evidence.
 
 This prevents descriptive cross-references such as “Figure 3 ... reported in Table
 2” from being split merely because another object identifier occurs in the text.
@@ -128,6 +135,11 @@ still be inferred from a distinct, type-compatible neighboring object, but only
 when a later explicit caption anchor has its own different parent. Resolved overlays
 mark derived boxes as `[split:Figure]`, `[split:Table]`, and so on; raw overlays
 intentionally continue to show the immutable merged Docling detection.
+Derived captions replace their source caption's existing reading-order slot; the
+validator does not globally re-sort the page, so established multi-column order is
+preserved. Prefix aliases, compatible parent classes, and preferred above/below
+directions are kept in an extensible validation registry rather than page-specific
+rules.
 
 Overlap handling is deliberately separate from physical layout filtering. Despite
 the compatibility module name, intersecting regions of every semantic class are

@@ -62,3 +62,9 @@ caption_validation:
   max_parent_gap_page_ratio: 0.12
   min_parent_horizontal_overlap: 0.18
   use_pdf_text_lines: true
+  use_selective_line_provider: true
+  provider_quality_threshold: 0.55
+  parent_ambiguity_margin: 0.75
+  min_boundary_gap_line_ratio: 0.18
+  strong_boundary_gap_line_ratio: 0.55
+  max_line_outside_source_ratio: 0.15

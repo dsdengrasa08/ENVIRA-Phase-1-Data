@@ -2,8 +2,8 @@ from envira_pdf_layout.caption_validation import (
     CaptionLine,
     validate_and_segment_captions,
 )
+from envira_pdf_layout.config import CaptionValidationConfig
 from envira_pdf_layout.table_context import associate_table_context
-
 
 PAGES = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1200}]
 
@@ -192,3 +192,149 @@ def test_missing_leading_identifier_can_be_inferred_from_distinct_parent_geometr
     assert decisions[0]["anchors"][0]["implicit"] is True
     assert [item["caption_object_type"] for item in segments] == ["Figure", "Table"]
     assert {edge["parent_region_id"] for edge in associations} == {"figure", "table"}
+
+
+def test_wrapped_line_start_cross_reference_without_paragraph_reset_is_not_split():
+    regions = [
+        region("figure", "Figure", [100, 100, 800, 400]),
+        region(
+            "caption",
+            "Caption",
+            [100, 405, 800, 490],
+            lines=[
+                ("Figure 3. Comparison with values reported in", [100, 405, 800, 440]),
+                ("Table 2 under experimental conditions.", [145, 440, 800, 475]),
+            ],
+        ),
+        region("table", "Table", [100, 500, 800, 900]),
+    ]
+    resolved, decisions, _ = validate_and_segment_captions(regions, PAGES)
+    assert not any(item.get("derived_from_region_id") for item in resolved)
+    assert decisions == []
+
+
+def test_parent_assignment_must_be_type_compatible():
+    regions = [
+        region("figure-a", "Figure", [100, 100, 800, 300]),
+        region(
+            "caption",
+            "Caption",
+            [100, 305, 800, 410],
+            lines=[
+                ("Figure 1. First.", [100, 305, 800, 345]),
+                ("Table 2. Not backed by a table detection.", [100, 365, 800, 405]),
+            ],
+        ),
+        region("figure-b", "Figure", [100, 415, 800, 700]),
+    ]
+    resolved, decisions, _ = validate_and_segment_captions(regions, PAGES)
+    assert not any(item.get("derived_from_region_id") for item in resolved)
+    assert decisions[0]["action"] == "retain"
+
+
+def test_ambiguous_same_type_parents_prevent_automatic_split():
+    regions = [
+        region("figure-a", "Figure", [100, 100, 440, 300]),
+        region("figure-b", "Figure", [460, 100, 800, 300]),
+        region(
+            "caption",
+            "Caption",
+            [100, 305, 800, 410],
+            lines=[
+                ("Figure 1. First.", [100, 305, 800, 345]),
+                ("Figure 2. Second.", [100, 365, 800, 405]),
+            ],
+        ),
+    ]
+    resolved, decisions, _ = validate_and_segment_captions(regions, PAGES)
+    assert not any(item.get("derived_from_region_id") for item in resolved)
+    assert decisions[0]["parent_assignment_unambiguous"] is False
+
+
+def test_low_quality_native_lines_can_be_replaced_by_selective_provider():
+    calls = []
+
+    def provider(candidate, page):
+        calls.append(candidate["layout_region_id"])
+        return [
+            CaptionLine(
+                "Figure 8. Plot",
+                (100, 405, 800, 445),
+                source="glm_ocr",
+                confidence=0.99,
+            ),
+            CaptionLine(
+                "Table 9. Values",
+                (100, 465, 800, 505),
+                source="glm_ocr",
+                confidence=0.99,
+            ),
+        ]
+
+    regions = [
+        region("figure", "Figure", [100, 100, 800, 400]),
+        region(
+            "caption",
+            "Caption",
+            [100, 405, 800, 510],
+            lines=[("garbled", [100, 405, 120, 410])],
+        ),
+        region("table", "Table", [100, 515, 800, 900]),
+    ]
+    config = CaptionValidationConfig(provider_quality_threshold=0.9)
+    resolved, decisions, _ = validate_and_segment_captions(
+        regions, PAGES, config, line_provider=provider
+    )
+    assert calls == ["caption"]
+    assert decisions[0]["action"] == "split"
+    assert decisions[0]["provider_reason"] == "low_quality_lines"
+
+
+def test_provider_geometry_outside_source_is_rejected():
+    def provider(candidate, page):
+        return [
+            CaptionLine("Figure 8. Plot", (100, 405, 800, 445), source="glm_ocr"),
+            CaptionLine("Table 9. Values", (100, 600, 800, 640), source="glm_ocr"),
+        ]
+
+    regions = [
+        region("figure", "Figure", [100, 100, 800, 400]),
+        region("caption", "Caption", [100, 405, 800, 510]),
+        region("table", "Table", [100, 515, 800, 900]),
+    ]
+    resolved, decisions, _ = validate_and_segment_captions(
+        regions, PAGES, line_provider=provider
+    )
+    assert not any(item.get("derived_from_region_id") for item in resolved)
+    assert decisions[0]["reason"] == "line_geometry_outside_source"
+
+
+def test_split_preserves_existing_multicolumn_order_slot():
+    regions = [
+        {
+            **region("right-before", "Text", [600, 50, 900, 90]),
+            "layout_reading_order": 1,
+        },
+        {**region("figure", "Figure", [100, 100, 500, 300]), "layout_reading_order": 2},
+        {
+            **region(
+                "caption",
+                "Caption",
+                [100, 305, 500, 410],
+                lines=[
+                    ("Figure 1. Plot", [100, 305, 500, 345]),
+                    ("Table 2. Values", [100, 365, 500, 405]),
+                ],
+            ),
+            "layout_reading_order": 3,
+        },
+        {**region("table", "Table", [100, 415, 500, 700]), "layout_reading_order": 4},
+    ]
+    resolved, _, _ = validate_and_segment_captions(regions, PAGES)
+    by_id = {item["layout_region_id"]: item for item in resolved}
+    assert by_id["right-before"]["resolved_reading_order"] == 1
+    segments = sorted(
+        (item for item in resolved if item.get("derived_from_region_id")),
+        key=lambda item: item["caption_segment_index"],
+    )
+    assert [item["resolved_reading_order"] for item in segments] == [3, 4]

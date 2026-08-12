@@ -115,6 +115,11 @@ def convert_docling_items(
                     "height_px": y1 - y0,
                     "area_px": (x1 - x0) * (y1 - y0),
                     "page_image_path": str(page_map[page_number].page_image_path),
+                    **{
+                        key: item[key]
+                        for key in ("text_lines", "ocr_lines", "lines", "typography")
+                        if item.get(key)
+                    },
                 }
             )
     return regions

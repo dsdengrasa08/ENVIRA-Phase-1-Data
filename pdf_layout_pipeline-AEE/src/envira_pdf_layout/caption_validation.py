@@ -9,12 +9,12 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import product
 import re
 from typing import Any, Callable
 
 from .config import CaptionValidationConfig
 from .types import LayoutRegion
-
 
 _IDENTIFIER = r"(?:[A-Z](?:[.\-]?\d+)?|[IVXLCDM]+|\d+(?:[.\-][A-Za-z0-9]+)*)"
 
@@ -25,6 +25,8 @@ class CaptionLine:
     bbox_px: tuple[float, float, float, float]
     typography: dict[str, Any] | None = None
     source: str = "region"
+    confidence: float | None = None
+    paragraph_start: bool | None = None
 
 
 def _page_size(page: dict[str, Any]) -> tuple[float, float]:
@@ -72,11 +74,20 @@ def _coerce_lines(region: LayoutRegion) -> list[CaptionLine]:
                         tuple(map(float, bbox)),
                         value.get("typography"),
                         str(value.get("source") or key),
+                        _float_or_none(value.get("confidence")),
+                        value.get("paragraph_start"),
                     )
                 )
         if lines:
             return sorted(lines, key=lambda line: (line.bbox_px[1], line.bbox_px[0]))
     return []
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _pdf_lines(
@@ -134,7 +145,144 @@ def _union(lines: list[CaptionLine]) -> list[float]:
     ]
 
 
-def _parent_score(segment, object_type, parent, page, config):
+def _median(values: list[float], default: float = 0.0) -> float:
+    values = sorted(values)
+    if not values:
+        return default
+    middle = len(values) // 2
+    return (
+        values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2
+    )
+
+
+def _line_quality(lines: list[CaptionLine], source_box) -> float:
+    """Estimate whether extracted lines are trustworthy enough for segmentation."""
+    if not lines:
+        return 0.0
+    ordered = all(a.bbox_px[1] <= b.bbox_px[1] for a, b in zip(lines, lines[1:]))
+    source_area = max(
+        1.0, (source_box[2] - source_box[0]) * (source_box[3] - source_box[1])
+    )
+    inside = 0.0
+    for line in lines:
+        x0, y0, x1, y1 = line.bbox_px
+        inside += max(0.0, min(x1, source_box[2]) - max(x0, source_box[0])) * max(
+            0.0, min(y1, source_box[3]) - max(y0, source_box[1])
+        )
+    confidences = [line.confidence for line in lines if line.confidence is not None]
+    confidence = _median(confidences, 0.8)
+    coverage = min(1.0, inside / source_area * 3.0)
+    return 0.45 * confidence + 0.35 * coverage + (0.20 if ordered else 0.0)
+
+
+def _lines_fit_source(lines: list[CaptionLine], source_box, tolerance: float) -> bool:
+    for line in lines:
+        x0, y0, x1, y1 = line.bbox_px
+        area = max(1.0, (x1 - x0) * (y1 - y0))
+        inside = max(0.0, min(x1, source_box[2]) - max(x0, source_box[0])) * max(
+            0.0, min(y1, source_box[3]) - max(y0, source_box[1])
+        )
+        if 1.0 - inside / area > tolerance:
+            return False
+    return True
+
+
+def _boundary_features(
+    lines: list[CaptionLine], index: int, config: CaptionValidationConfig
+) -> dict[str, Any]:
+    previous, current = lines[index - 1], lines[index]
+    heights = [max(1.0, line.bbox_px[3] - line.bbox_px[1]) for line in lines]
+    typical_height = _median(heights, 1.0)
+    gaps = [max(0.0, b.bbox_px[1] - a.bbox_px[3]) for a, b in zip(lines, lines[1:])]
+    typical_gap = _median(gaps, 0.0)
+    gap = max(0.0, current.bbox_px[1] - previous.bbox_px[3])
+    gap_ratio = gap / typical_height
+    relative_gap = gap / max(1.0, typical_gap) if typical_gap else gap_ratio
+    indent_reset = current.bbox_px[0] <= previous.bbox_px[0] + typical_height * 0.35
+    style_before, style_after = previous.typography or {}, current.typography or {}
+    style_reset = bool(style_before and style_after and style_before != style_after)
+    paragraph = (
+        current.paragraph_start is True
+        or gap_ratio >= config.min_boundary_gap_line_ratio
+        or indent_reset
+    )
+    return {
+        "gap_px": round(gap, 4),
+        "gap_line_ratio": round(gap_ratio, 4),
+        "relative_gap": round(relative_gap, 4),
+        "indent_reset": indent_reset,
+        "typography_reset": style_reset,
+        "logical_paragraph_start": paragraph,
+    }
+
+
+def _compatible_parent_types(
+    config: CaptionValidationConfig, object_type: str
+) -> set[str]:
+    return next(
+        (set(types) for kind, types in config.parent_types if kind == object_type),
+        set(),
+    )
+
+
+def _same_column(segment_column, parent) -> bool:
+    parent_column = parent.get("reading_order_column")
+    return segment_column in {None, "single", parent_column} or parent_column in {
+        None,
+        "single",
+    }
+
+
+def _has_blocker(segment_box, parent, page_regions) -> bool:
+    pb = parent["bbox_px"]
+    corridor_top, corridor_bottom = (
+        sorted((segment_box[3], pb[1]))
+        if segment_box[3] <= pb[1]
+        else sorted((pb[3], segment_box[1]))
+    )
+    for region in page_regions:
+        if region is parent or region.get("type") not in {
+            "Figure",
+            "Table",
+            "Formula",
+            "Equation",
+            "Algorithm",
+            "Listing",
+            "Code",
+        }:
+            continue
+        rb = region["bbox_px"]
+        if (
+            rb[1] < corridor_bottom
+            and rb[3] > corridor_top
+            and _horizontal_overlap(segment_box, rb) >= 0.35
+        ):
+            return True
+    return False
+
+
+def _best_distinct_assignment(segments):
+    """Return the best one-to-one segment/parent assignment and its margin."""
+    if not segments or any(not item[3] for item in segments):
+        return None, 0.0
+    hypotheses = []
+    for choices in product(*(item[3] for item in segments)):
+        parent_ids = [str(parent["layout_region_id"]) for _, parent in choices]
+        if len(set(parent_ids)) != len(parent_ids):
+            continue
+        hypotheses.append((sum(score for score, _ in choices), choices))
+    hypotheses.sort(key=lambda item: item[0], reverse=True)
+    if not hypotheses:
+        return None, 0.0
+    margin = (
+        hypotheses[0][0] - hypotheses[1][0] if len(hypotheses) > 1 else float("inf")
+    )
+    return hypotheses[0][1], margin
+
+
+def _parent_score(
+    segment, object_type, parent, page, config, page_regions=(), segment_column=None
+):
     cb, pb = segment, list(map(float, parent["bbox_px"]))
     _, height = _page_size(page)
     overlap = _horizontal_overlap(cb, pb)
@@ -145,16 +293,33 @@ def _parent_score(segment, object_type, parent, page, config):
     ):
         return None
     parent_type = str(parent.get("type") or "")
-    compatible = object_type == parent_type or (
-        object_type == "Formula" and parent_type in {"Formula", "Equation"}
+    compatible = parent_type in _compatible_parent_types(config, object_type)
+    if not compatible:
+        return None
+    if not _same_column(segment_column, parent):
+        return None
+    if _has_blocker(cb, parent, page_regions):
+        return None
+    direction = next(
+        (value for kind, value in config.preferred_directions if kind == object_type),
+        "either",
     )
     caption_below = cb[1] >= pb[3]
-    expected = caption_below if object_type == "Figure" else cb[3] <= pb[1]
+    caption_above = cb[3] <= pb[1]
+    expected = (
+        direction == "either"
+        or (direction == "below" and caption_below)
+        or (direction == "above" and caption_above)
+    )
     score = (
         2.0 * overlap
         + 2.0 * (1.0 - gap / config.max_parent_gap_page_ratio)
-        + (config.type_match_bonus if compatible else -config.type_mismatch_penalty)
-        + (config.expected_direction_bonus if expected else 0.0)
+        + config.type_match_bonus
+        + (
+            config.expected_direction_bonus
+            if expected
+            else -config.expected_direction_bonus / 2
+        )
     )
     return score
 
@@ -181,7 +346,7 @@ def _implicit_leading_anchor(
     for parent in parents:
         parent_type = str(parent.get("type") or "")
         object_type = "Formula" if parent_type == "Equation" else parent_type
-        score = _parent_score(leading_box, object_type, parent, page, config)
+        score = _parent_score(leading_box, object_type, parent, page, config, parents)
         if score is not None and score > 0:
             scored.append((score, object_type, parent))
     if not scored:
@@ -194,7 +359,11 @@ def _implicit_leading_anchor(
     later = [
         (score, candidate)
         for candidate in parents
-        if (score := _parent_score(later_box, later_type, candidate, page, config))
+        if (
+            score := _parent_score(
+                later_box, later_type, candidate, page, config, parents
+            )
+        )
         is not None
     ]
     later.sort(key=lambda item: item[0], reverse=True)
@@ -211,8 +380,9 @@ def validate_and_segment_captions(
     config: CaptionValidationConfig | None = None,
     *,
     pdf_path=None,
-    line_provider: Callable[[LayoutRegion, dict[str, Any]], list[CaptionLine]]
-    | None = None,
+    line_provider: (
+        Callable[[LayoutRegion, dict[str, Any]], list[CaptionLine]] | None
+    ) = None,
 ) -> tuple[list[LayoutRegion], list[dict[str, Any]], list[dict[str, Any]]]:
     """Return semantic regions, segmentation decisions, and parent associations."""
     config = config or CaptionValidationConfig()
@@ -223,6 +393,11 @@ def validate_and_segment_captions(
     for region in regions:
         by_page[int(region["page_number"])].append(region)
     patterns = _anchor_patterns(config)
+    attachable_parent_types = {
+        parent_type
+        for _, parent_types in config.parent_types
+        for parent_type in parent_types
+    }
     output: list[LayoutRegion] = []
     decisions: list[dict[str, Any]] = []
     associations: list[dict[str, Any]] = []
@@ -233,35 +408,64 @@ def validate_and_segment_captions(
             continue
         page = page_map[int(region["page_number"])]
         lines = _coerce_lines(region)
+        initial_line_source = "structured" if lines else None
         if not lines and config.use_pdf_text_lines:
             lines = _pdf_lines(region, page, pdf_path)
+            initial_line_source = "pdf_text" if lines else None
         nearby_assets = [
             candidate
             for candidate in by_page[int(region["page_number"])]
-            if candidate.get("type") in {"Figure", "Table", "Formula", "Equation"}
+            if candidate.get("type") in attachable_parent_types
             and _horizontal_overlap(region["bbox_px"], candidate["bbox_px"])
             >= config.min_parent_horizontal_overlap
         ]
-        if not lines and line_provider and len(nearby_assets) >= 2:
+        quality = _line_quality(lines, region["bbox_px"])
+        provider_reason = None
+        if (
+            line_provider
+            and config.use_selective_line_provider
+            and len(nearby_assets) >= 2
+            and (not lines or quality < config.provider_quality_threshold)
+        ):
             # Selective OCR/GLM adapters plug in here and must return line boxes.
-            lines = line_provider(region, page)
+            provider_lines = sorted(
+                line_provider(region, page),
+                key=lambda line: (line.bbox_px[1], line.bbox_px[0]),
+            )
+            provider_quality = _line_quality(provider_lines, region["bbox_px"])
+            if provider_lines and (not lines or provider_quality > quality):
+                lines, quality = provider_lines, provider_quality
+                provider_reason = (
+                    "missing_lines" if not initial_line_source else "low_quality_lines"
+                )
+        geometry_valid = _lines_fit_source(
+            lines, region["bbox_px"], config.max_line_outside_source_ratio
+        )
         anchors: list[tuple[int, str, str | None]] = []
+        boundary_evidence: dict[int, dict[str, Any]] = {}
         for index, line in enumerate(lines):
             for object_type, pattern in patterns:
                 match = pattern.match(line.text)
                 if match:
-                    anchors.append((index, object_type, match.group("label")))
+                    if index == 0:
+                        anchors.append((index, object_type, match.group("label")))
+                    else:
+                        evidence = _boundary_features(lines, index, config)
+                        boundary_evidence[index] = evidence
+                        if evidence["logical_paragraph_start"]:
+                            anchors.append((index, object_type, match.group("label")))
                     break
         source_id = str(region["layout_region_id"])
         parents = [
             candidate
             for candidate in by_page[int(region["page_number"])]
-            if candidate.get("type") in {"Figure", "Table", "Formula", "Equation"}
+            if candidate.get("type") in attachable_parent_types
         ]
         implicit = _implicit_leading_anchor(lines, anchors, parents, page, config)
         if implicit:
             anchors.insert(0, implicit)
-        if len(anchors) < 2 or anchors[0][0] != 0:
+        invalid_split_geometry = not geometry_valid and len(anchors) >= 2
+        if invalid_split_geometry or len(anchors) < 2 or anchors[0][0] != 0:
             kept = deepcopy(region)
             kept["caption_validation_status"] = (
                 "single" if len(anchors) <= 1 else "ambiguous"
@@ -272,8 +476,14 @@ def validate_and_segment_captions(
                     {
                         "source_region_id": source_id,
                         "action": "retain",
-                        "reason": "first_anchor_not_at_region_start",
+                        "reason": (
+                            "line_geometry_outside_source"
+                            if invalid_split_geometry
+                            else "first_anchor_not_at_region_start"
+                        ),
                         "anchors": anchors,
+                        "line_quality": round(quality, 4),
+                        "provider_reason": provider_reason,
                     }
                 )
             continue
@@ -291,19 +501,60 @@ def validate_and_segment_captions(
             scored = [
                 (score, p)
                 for p in parents
-                if (score := _parent_score(bbox, anchor[1], p, page, config))
+                if (
+                    score := _parent_score(
+                        bbox,
+                        anchor[1],
+                        p,
+                        page,
+                        config,
+                        by_page[int(region["page_number"])],
+                        region.get("reading_order_column"),
+                    )
+                )
                 is not None
             ]
             scored.sort(key=lambda item: item[0], reverse=True)
             segments.append((anchor, member_lines, bbox, scored))
 
-        independent = len(segments) == len(anchors) and all(
-            item[3] and item[3][0][0] > 0 for item in segments
+        assignment, assignment_margin = _best_distinct_assignment(segments)
+        if assignment:
+            # Downstream emission expects the selected parent first while retaining
+            # every alternative for diagnostics.
+            segments = [
+                (
+                    anchor,
+                    member_lines,
+                    bbox,
+                    [selected]
+                    + [candidate for candidate in scored if candidate != selected],
+                )
+                for (anchor, member_lines, bbox, scored), selected in zip(
+                    segments, assignment
+                )
+            ]
+        parent_unambiguous = bool(
+            assignment
+            and all(selected[0] > 0 for selected in assignment)
+            and assignment_margin >= config.parent_ambiguity_margin
         )
+        independent = len(segments) == len(anchors) and parent_unambiguous
         distinct_parents = len(
             {str(item[3][0][1]["layout_region_id"]) for item in segments if item[3]}
         ) == len(segments)
-        boundary_score = 2.0 * (len(segments) - 1)
+        boundary_score = 0.0
+        for anchor in anchors[1:]:
+            evidence = boundary_evidence.get(anchor[0], {})
+            boundary_score += 1.2
+            boundary_score += min(1.2, float(evidence.get("gap_line_ratio", 0.0)))
+            boundary_score += (
+                0.4
+                if float(evidence.get("gap_line_ratio", 0.0))
+                >= config.strong_boundary_gap_line_ratio
+                else 0.0
+            )
+            boundary_score += 0.4 if evidence.get("indent_reset") else 0.0
+            boundary_score += 0.4 if evidence.get("typography_reset") else 0.0
         parent_score = sum(min(4.0, item[3][0][0]) for item in segments if item[3])
         split_score = boundary_score + parent_score + (1.0 if distinct_parents else 0.0)
         null_score = max(
@@ -318,9 +569,11 @@ def validate_and_segment_captions(
         decision = {
             "source_region_id": source_id,
             "action": "split" if accepted else "retain",
-            "reason": "multiple_independent_caption_starts"
-            if accepted
-            else "insufficient_joint_semantic_spatial_evidence",
+            "reason": (
+                "multiple_independent_caption_starts"
+                if accepted
+                else "insufficient_joint_semantic_spatial_evidence"
+            ),
             "split_score": round(split_score, 4),
             "null_score": round(null_score, 4),
             "anchors": [
@@ -333,6 +586,15 @@ def validate_and_segment_captions(
                 for a in anchors
             ],
             "text_source": sorted({line.source for line in lines}),
+            "line_quality": round(quality, 4),
+            "provider_reason": provider_reason,
+            "boundary_evidence": boundary_evidence,
+            "parent_assignment_unambiguous": parent_unambiguous,
+            "parent_assignment_margin": (
+                None
+                if assignment_margin == float("inf")
+                else round(assignment_margin, 4)
+            ),
         }
         decisions.append(decision)
         if not accepted:
@@ -370,6 +632,11 @@ def validate_and_segment_captions(
                 caption_validation_status="split",
                 resolution_action="semantic_caption_split",
                 geometry_version=int(region.get("geometry_version", 1)) + 1,
+                caption_line_source=sorted({line.source for line in member_lines}),
+                caption_line_count=len(member_lines),
+                caption_parent_confidence_margin=(
+                    round(scored[0][0] - scored[1][0], 4) if len(scored) > 1 else None
+                ),
             )
             output.append(derived)
             associations.append(
@@ -391,15 +658,26 @@ def validate_and_segment_captions(
                     },
                 }
             )
-    # Reconstruct stable page-local resolved order after one-to-many replacement.
+    # Replace each source caption's existing order slot without globally sorting
+    # the page and damaging an already-established multi-column reading stream.
     ordered_by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
     for region in output:
         ordered_by_page[int(region["page_number"])].append(region)
     for page_regions in ordered_by_page.values():
         page_regions.sort(
-            key=lambda item: (float(item["bbox_px"][1]), float(item["bbox_px"][0]))
+            key=lambda item: (
+                int(
+                    item.get("layout_reading_order")
+                    or item.get("resolved_reading_order")
+                    or 10**9
+                ),
+                int(item.get("caption_segment_index") or 0),
+                float(item["bbox_px"][1]),
+            )
         )
-        for order, item in enumerate(page_regions, 1):
+        order = 0
+        for item in page_regions:
             if not item.get("nested_parent_region_ids"):
+                order += 1
                 item["resolved_reading_order"] = order
     return output, decisions, associations
