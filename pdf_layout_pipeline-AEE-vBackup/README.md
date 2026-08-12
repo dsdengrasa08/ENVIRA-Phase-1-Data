@@ -49,6 +49,28 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `layout_overlap.py`: generalized class-family relationship graph, immutable
   source/resolved geometry, complete-link duplicate canonicalization,
   hierarchy/conflict/fragment analysis, and attachable-parent association.
+- `caption_decomposition.py`: native-word-first inspection of suspicious caption
+  boxes, optional GLM-OCR semantic verification, coordinate-based splitting,
+  typed derived captions, and one-to-one compatible asset association.
+
+## Merged-caption decomposition
+
+After overlap normalization and before final caption association, suspicious
+detector `Caption` boxes are inspected using clipped native PDF words. Multiple
+caption starts must occur at localized line starts and pass lexical, geometric,
+and nearby-object checks. The split boxes are unions of actual text lines rather
+than equal subdivisions, and the original region ID and box remain in every
+derived child's provenance. Figure/table references embedded in a line do not
+create anchors; constrained OCR-confusion matching is permitted only with the
+same geometric safeguards.
+
+GLM-OCR is an optional verifier configured through `PHASE1_GLM_OCR_ENDPOINT`,
+`PHASE1_GLM_OCR_API_KEY`, and `PHASE1_GLM_OCR_MODEL`. It receives a crop and the
+localized native lines and returns semantic JSON. A configured verifier must
+affirm a split; failures and uncertainty cause conservative abstention. Because
+GLM output is not treated as geometric authority, an unavailable text layer
+never causes an arbitrary split. All attempts and abstention reasons are exposed
+under the `caption_decomposition` diagnostics entry.
 
 ## Generalized overlap resolution
 

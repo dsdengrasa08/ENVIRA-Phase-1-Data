@@ -52,4 +52,12 @@ overlap_resolution:
   fragment_horizontal_overlap: 0.50
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
+caption_decomposition:
+  enabled: true
+  native_text_first: true
+  glm_verify: true
+  # Configure PHASE1_GLM_OCR_ENDPOINT and PHASE1_GLM_OCR_API_KEY to enable
+  # semantic verification. Strong coordinate-bearing native evidence remains
+  # usable when the remote verifier is not configured.
+  glm_model: glm-ocr
   preserve_authoritative_nested_regions: true
