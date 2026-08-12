@@ -199,7 +199,7 @@ def render_table_context_overlay(run, page_number, output_path: Path | None = No
     image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError(page["page_image_path"])
-    regions = {r["layout_region_id"]: r for r in run.final_regions}
+    regions = {r["layout_region_id"]: r for r in run.resolved_regions}
     palette = [(0, 140, 255), (220, 80, 20), (40, 170, 80), (180, 60, 180)]
     role_specs = {
         "Body": (4, cv2.LINE_8),

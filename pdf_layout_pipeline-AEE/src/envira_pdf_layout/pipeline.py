@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .authoritative import run_authoritative_pipeline
+from .modular_pipeline import run_modular_pipeline
 from copy import deepcopy
 
 from .caption_overlap import build_caption_groups
@@ -20,7 +20,7 @@ def run_layout_pipeline(conversion, page_set, config, *, caption_line_provider=N
     called only when a caption has neither structured lines nor usable native PDF
     text, and must return line text with page-pixel bounding boxes.
     """
-    result = run_authoritative_pipeline(conversion, page_set, config)
+    result = run_modular_pipeline(conversion, page_set, config)
     try:
         docling_version = version("docling")
     except PackageNotFoundError:
@@ -36,14 +36,14 @@ def run_layout_pipeline(conversion, page_set, config, *, caption_line_provider=N
         "nms_configuration": "not_exposed_by_pipeline",
     }
     resolution_input = list(result.final_regions)
-    if config.overlap_resolution.preserve_authoritative_nested_regions:
+    if config.overlap_resolution.preserve_filtered_nested_regions:
         existing_ids = {str(region["layout_region_id"]) for region in resolution_input}
         for excluded in result.excluded_by_stage.get("nested_assets", []):
             region_id = str(excluded.get("layout_region_id"))
             if not region_id or region_id in existing_ids:
                 continue
             recovered = deepcopy(excluded)
-            recovered["authoritative_filter_disposition"] = "recovered_for_hierarchy"
+            recovered["filter_disposition"] = "recovered_for_hierarchy"
             recovered["emission_policy"] = "emit_as_nested_child"
             resolution_input.append(recovered)
             existing_ids.add(region_id)
@@ -94,7 +94,7 @@ def run_layout_pipeline(conversion, page_set, config, *, caption_line_provider=N
         "decision_count": len(result.resolution_decisions),
         "suppressed_region_count": len(result.suppressed_regions),
         "recovered_nested_region_count": sum(
-            region.get("authoritative_filter_disposition") == "recovered_for_hierarchy"
+            region.get("filter_disposition") == "recovered_for_hierarchy"
             for region in result.resolved_regions
         ),
         "relationships": result.layout_relationships,
@@ -121,11 +121,11 @@ def run_layout_pipeline(conversion, page_set, config, *, caption_line_provider=N
                 for association in group["associations"]
             ],
         }
-        result.caption_groups = build_caption_groups(
-            result.resolved_regions,
-            result.logical_tables,
-            result.caption_overlap_relationships,
-            result.pages,
-            config.caption_overlap,
-        )
+    result.caption_groups = build_caption_groups(
+        result.resolved_regions,
+        result.logical_tables,
+        result.layout_relationships,
+        result.pages,
+        config.caption_overlap,
+    )
     return result

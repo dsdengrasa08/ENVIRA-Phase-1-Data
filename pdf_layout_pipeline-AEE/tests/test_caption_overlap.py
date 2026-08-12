@@ -247,3 +247,31 @@ def test_caption_group_exposes_parent_union_and_provenance_children():
         [100, 100, 220, 130],
         [100, 135, 700, 165],
     ]
+
+
+def test_caption_groups_accept_mixed_relationship_schemas():
+    regions = [
+        region("caption", "Caption", [100, 100, 700, 150], "Figure 1", 1),
+        region("figure", "Figure", [100, 160, 700, 500], order=2),
+    ]
+    relationships = [
+        {
+            "kind": "ATTACHABLE_CONTEXT",
+            "page_number": 1,
+            "child_region_id": "caption",
+            "parent_region_id": "figure",
+        },
+        {
+            "kind": "ATTACHABLE_CONTEXT",
+            "page_number": 1,
+            "child_region_id": "caption",
+            "parent_region_id": None,
+            "candidate_parent_region_ids": ["figure"],
+        },
+    ]
+
+    groups = build_caption_groups(regions, [], relationships, PAGES)
+
+    assert len(groups) == 1
+    assert groups[0]["parent_region_id"] == "figure"
+    assert groups[0]["role"] == "figure_caption"
