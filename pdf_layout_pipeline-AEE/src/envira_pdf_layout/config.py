@@ -154,6 +154,30 @@ class OverlapResolutionConfig:
 
 
 @dataclass(frozen=True)
+class CaptionValidationConfig:
+    """Controls for decomposing detector captions into semantic captions."""
+
+    enabled: bool = True
+    prefixes: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("Figure", ("fig", "fig.", "figure")),
+        ("Table", ("table", "tab", "tab.")),
+        ("Formula", ("equation", "eq", "eq.")),
+        ("Algorithm", ("algorithm",)),
+        ("Listing", ("listing",)),
+    )
+    split_acceptance_score: float = 6.0
+    split_margin: float = 1.5
+    review_score: float = 4.0
+    max_parent_gap_page_ratio: float = 0.12
+    min_parent_horizontal_overlap: float = 0.18
+    expected_direction_bonus: float = 1.2
+    type_match_bonus: float = 2.5
+    type_mismatch_penalty: float = 2.5
+    min_segment_lines: int = 1
+    use_pdf_text_lines: bool = True
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     write_raw: bool = True
     write_regions: bool = True
@@ -175,6 +199,9 @@ class PipelineConfig:
     caption_overlap: CaptionOverlapConfig = field(default_factory=CaptionOverlapConfig)
     overlap_resolution: OverlapResolutionConfig = field(
         default_factory=OverlapResolutionConfig
+    )
+    caption_validation: CaptionValidationConfig = field(
+        default_factory=CaptionValidationConfig
     )
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
@@ -264,6 +291,14 @@ class PipelineConfig:
             raise ValueError("page_end must not precede page_start")
         if self.document.render_dpi <= 0:
             raise ValueError("render_dpi must be positive")
+        if self.caption_validation.split_acceptance_score < 0:
+            raise ValueError("caption validation acceptance score must be non-negative")
+        if self.caption_validation.split_margin < 0:
+            raise ValueError("caption validation margin must be non-negative")
+        if not 0 <= self.caption_validation.max_parent_gap_page_ratio <= 1:
+            raise ValueError("caption validation parent gap ratio must be in [0, 1]")
+        if not 0 <= self.caption_validation.min_parent_horizontal_overlap <= 1:
+            raise ValueError("caption validation parent overlap must be in [0, 1]")
         if not 0 < self.table_context.max_vertical_gap_page_ratio <= 1:
             raise ValueError("table context vertical gap ratio must be in (0, 1]")
         if not 0 <= self.table_context.min_horizontal_overlap_ratio <= 1:

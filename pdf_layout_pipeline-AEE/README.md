@@ -46,6 +46,8 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   table body with optional identifier, caption, note, footnote, and source regions.
 - `caption_overlap.py`: conservative caption-overlap analysis, clear-duplicate
   resolution, and provenance-preserving semantic caption groups.
+- `caption_validation.py`: line-level semantic-spatial validation of detector
+  captions, conservative one-to-many segmentation, and reassociation.
 - `layout_overlap.py`: generalized class-family relationship graph, immutable
   source/resolved geometry, complete-link duplicate canonicalization,
   hierarchy/conflict/fragment analysis, and attachable-parent association.
@@ -110,6 +112,17 @@ success or the presence of a printed number. Cross-page continuation fields are
 reserved on each page-local group for a later document-level continuation stage.
 
 ## Caption overlap resolution
+
+Before caption-to-object association, merged-caption validation reuses native PDF
+lines or structured `text_lines`/`ocr_lines`; integrations may supply a structured
+OCR provider as a selective fallback. Prefixes at logical line starts only propose
+boundaries. A split is accepted only when every segment has a distinct,
+type-compatible nearby parent and the joint semantic-spatial score beats the
+unsplit hypothesis by a configured margin. Accepted segments preserve their source
+detector ID and box; ambiguous regions remain unchanged with auditable evidence.
+
+This prevents descriptive cross-references such as “Figure 3 ... reported in Table
+2” from being split merely because another object identifier occurs in the text.
 
 Overlap handling is deliberately separate from physical layout filtering. Despite
 the compatibility module name, intersecting regions of every semantic class are
