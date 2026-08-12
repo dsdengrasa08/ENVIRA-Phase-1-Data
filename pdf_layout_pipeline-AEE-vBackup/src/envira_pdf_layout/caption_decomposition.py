@@ -42,12 +42,14 @@ def _horizontal_overlap(a, b) -> float:
 
 def _native_lines(document, page_number: int, bbox_px, page) -> list[TextLine]:
     """Extract clipped native words and return coordinates in rendered pixels."""
-    import fitz
+    import pymupdf
 
     sx = float(page["image_width_px"]) / float(page["page_width_pt"])
     sy = float(page["image_height_px"]) / float(page["page_height_pt"])
-    clip = fitz.Rect(bbox_px[0] / sx, bbox_px[1] / sy, bbox_px[2] / sx, bbox_px[3] / sy)
-    with fitz.open(document.pdf_path) as pdf:
+    clip = pymupdf.Rect(
+        bbox_px[0] / sx, bbox_px[1] / sy, bbox_px[2] / sx, bbox_px[3] / sy
+    )
+    with pymupdf.open(document.pdf_path) as pdf:
         words = pdf[page_number - 1].get_text("words", clip=clip, sort=True)
     grouped: dict[tuple[int, int], list[tuple]] = defaultdict(list)
     for word in words:

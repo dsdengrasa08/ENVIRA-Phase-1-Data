@@ -70,6 +70,11 @@ the BigModel OpenAI-compatible chat-completions URL and can be overridden. All
 scan results, positioned-line sources, anchors, derived IDs, and abstention
 reasons are exposed under the `caption_decomposition` diagnostics entry.
 
+Page preparation uses the current `pymupdf` API. Rendered PDFs and PNGs are
+encoded in memory and copied through a retrying Python writer instead of MuPDF's
+direct native `fwrite`; this avoids intermittent `FzErrorSystem: cannot fwrite`
+failures on Colab/Google Drive FUSE mounts and prevents partial page artifacts.
+
 ## Generalized overlap resolution
 
 The maintained pipeline now resolves overlaps after the authoritative filters and
