@@ -1,9 +1,10 @@
 # ENVIRA modular PDF layout pipeline
 
-This directory is the maintained, package-backed successor to the repository-root
-`pdf_layoutparser_vF.ipynb`. The root notebook remains an unchanged reference
-implementation. The new workflow preserves its visible, stage-by-stage inspection
-style while moving reusable processing into `src/envira_pdf_layout`.
+This directory is the maintained, independent package-backed PDF layout pipeline.
+The historical `pdf_layoutparser_vF.ipynb` remains unchanged for provenance and
+regression review, but it is not read, imported, or executed by the production
+workflow. The workflow preserves visible, stage-by-stage inspection while the
+complete active processing implementation lives in `src/envira_pdf_layout`.
 
 ## Run
 
@@ -33,12 +34,15 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `authoritative.py`: fidelity adapter that executes the immutable reference
-  notebook's item conversion, page-1 recovery, filters, asset recovery, and
-  reading-order implementation in an isolated namespace.
-- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: legacy
-  independently testable helpers retained for compatibility; the maintained
-  workflow does not substitute them for the authoritative algorithms.
+- `independent_core.py`: package-owned extraction of the established item
+  conversion, page-1 recovery, filters, asset recovery, reading order, and output
+  construction. Its preserved stage ordering is the production implementation.
+- `authoritative.py`: compatibility alias for callers using the former entry point;
+  it delegates directly to the independent package core and does not load a
+  notebook.
+- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: smaller
+  independently testable compatibility helpers; the production core retains the
+  complete established heuristics in `independent_core.py`.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
@@ -52,7 +56,7 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 
 ## Generalized overlap resolution
 
-The maintained pipeline now resolves overlaps after the authoritative filters and
+The maintained pipeline resolves overlaps after the preserved core filters and
 before semantic context grouping. Regions removed by the authoritative nested-
 asset filter are conservatively restored to the relationship layer as nested
 children, so their text and geometry remain auditable without forcing them into
@@ -78,7 +82,7 @@ unresolved conflicts.
 
 ## Logical table context
 
-After the authoritative filters and reading-order assignment, the package creates
+After the core filters and reading-order assignment, the package creates
 one logical group for every retained table. Groups reference existing region IDs;
 they do not reclassify regions or enlarge the physical table-body bounding box.
 Association combines normalized geometry, column compatibility, reading order,
@@ -114,7 +118,7 @@ reserved on each page-local group for a later document-level continuation stage.
 Overlap handling is deliberately separate from physical layout filtering. Despite
 the compatibility module name, intersecting regions of every semantic class are
 analyzed; caption and table relationships receive additional role-aware grouping.
-The pipeline preserves `raw_regions` and authoritative `final_regions`, then creates
+The pipeline preserves `raw_regions` and core `final_regions`, then creates
 `resolved_regions` by collapsing only near-identical, role-compatible detections
 with compatible text evidence. Nested identifiers, complementary caption fragments,
 caption/table boundary overlaps, and ambiguous pairs remain available. Pairwise

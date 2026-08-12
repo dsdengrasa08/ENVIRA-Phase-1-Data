@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .authoritative import run_authoritative_pipeline
 from copy import deepcopy
 
 from .caption_overlap import build_caption_groups
+from .independent_core import run_independent_core
 from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
 from .table_context import associate_table_context
 
 
 def run_layout_pipeline(conversion, page_set, config):
-    """Run authoritative layout processing, then infer logical table groups."""
-    result = run_authoritative_pipeline(conversion, page_set, config)
+    """Run the independent layout core, then infer logical table groups."""
+    result = run_independent_core(conversion, page_set, config)
     try:
         docling_version = version("docling")
     except PackageNotFoundError:
