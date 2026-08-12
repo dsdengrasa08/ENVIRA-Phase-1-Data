@@ -9,8 +9,8 @@ directory is required to import, test, or run the pipeline.
 
 ### Colab
 
-Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, run the optional
-installation cell, and execute top to bottom. Google Drive and model paths support
+Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, select the YAML
+configuration profile, run the optional installation cell, and execute top to bottom. Google Drive and model paths support
 the documented `PHASE1_*` environment-variable overrides.
 
 ### Local/server
@@ -33,15 +33,19 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `independent_core.py`: package-owned extraction of the established item
-  conversion, page-1 recovery, filters, asset recovery, reading order, and output
-  construction. Its preserved stage ordering is the production implementation.
+- `independent_core.py`: package-owned orchestration of the remaining established
+  page-1 recovery, filters, asset recovery, reading order, and output construction.
+  Its preserved stage ordering remains the production implementation while stages
+  are migrated incrementally under equivalence tests.
 - `authoritative.py`: compatibility alias for callers using the former entry point;
   it delegates directly to the independent package core and does not load a
   notebook.
-- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: smaller
-  independently testable compatibility helpers; the production core retains the
-  complete established heuristics in `independent_core.py`.
+- `region_conversion.py`: the active Docling-to-ENVIRA conversion boundary. It
+  supports object and serialized Docling documents, preserves production IDs and
+  fields, and reports skipped provenance explicitly.
+- `filtering/`, `assets/`, `reading_order.py`: smaller independently testable
+  compatibility helpers. Until each is migrated under equivalence tests, the
+  corresponding established production heuristic remains in `independent_core.py`.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
@@ -52,6 +56,38 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `layout_overlap.py`: generalized class-family relationship graph, immutable
   source/resolved geometry, complete-link duplicate canonicalization,
   hierarchy/conflict/fragment analysis, and attachable-parent association.
+- `caption_association.py`: authoritative, class-aware and non-destructive
+  caption ownership with explicit ambiguity and unattached outcomes.
+- `roi_ocr.py`: cached, ROI-only OCR with source-coordinate mapping, guaranteed
+  resource cleanup, geometry validation, categorized contextual failures, and a
+  dependency-only circuit breaker. Page-local OCR failures remain isolated and do
+  not prevent fallback attempts on later pages.
+- `stage_trace.py`: compact stage-by-stage region counts, ID deltas, relationship
+  counts, and invariants for locating the first stage that introduced a regression.
+- `region_index.py`: immutable per-collection page, ID, type, page-size, and
+  normalized-text indexes shared by hierarchy, caption, and table-context stages.
+
+Geometry-heavy stages publish deterministic work counters alongside elapsed time.
+Overlap observations are reused by hierarchy policy, and the shared region index
+prevents repeated page/type/text indexing without introducing a mutable global cache.
+
+## Regression contracts
+
+Fast synthetic regression fixtures live under `tests/fixtures/regression` and use
+versioned semantic expectations rather than pixel-perfect screenshots. Stage traces
+carry a schema version and can be compared with
+`python -m envira_pdf_layout.regression compare BASELINE CANDIDATE`. Golden updates
+require an explicit fixture and reason and refuse invalid traces by default. Use
+`constraints-regression.txt` for reproducible model-backed or scheduled corpus runs;
+the default pull-request suite remains model-free. Export validation checks required
+artifacts, hierarchy partitions, relationship endpoints, unresolved containment,
+and trace schema compatibility.
+
+Test tiers are registered in `pytest.ini`: run `pytest -m regression` for the
+generated semantic fixtures, `pytest -m performance` for deterministic work
+contracts, and reserve `pytest -m model` for scheduled/model-backed environments.
+Committed fixtures are repository-generated JSON contracts and contain no
+third-party PDF content; private evaluation PDFs should remain in private CI jobs.
 
 ## Generalized overlap resolution
 
@@ -79,6 +115,43 @@ as separate JSONL artifacts. The workflow provides a resolution overlay showing
 source geometry, resolved geometry, suppressed detections, hierarchy arrows, and
 unresolved conflicts.
 
+Nested asset handling is non-destructive. Figure/table containment is proposed in
+the core, then validated once after duplicate resolution. Only semantically
+compatible children with one unambiguous container receive nested emission;
+expanded figures that newly capture text, nested containers, and competing parents
+remain top-level conflicts. Reading order is assigned after hierarchy acceptance as
+separate contiguous top-level and parent-local sequences. Explicit exports are
+`physical_layout_regions.jsonl`, `top_level_layout_regions.jsonl`, and
+`nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
+core-filtered physical input.
+
+General overlap resolution treats containment as observation only and emits
+`CONTAINMENT_CANDIDATE`; it never changes hierarchy emission. The hierarchy stage
+uses the shared typed containment thresholds, an explicit parent/child compatibility
+matrix, and explainable child-role inference. Text containment is classified as a
+duplicate, identifier fragment, or ambiguous text occlusion rather than container
+hierarchy. Unknown and incompatible combinations remain top-level, including a
+non-container covering only one child. Exactly one authoritative containment outcome
+per pair replaces the observational candidate in exported relationships.
+
+Caption-anchored figure completion is likewise proposal-based. The preserved image
+detector proposes geometry, then `figure_completion.py` validates caption confidence,
+growth, page bounds, newly captured regions, structural barriers, competing assets,
+and column-gutter crossings before downstream filtering. Rejected and ambiguous
+proposals restore detector geometry. Every proposal preserves source, proposed,
+resolved, visual-crop, and semantic-group boxes plus deterministic geometry history.
+Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
+with a source/proposal/barrier overlay in the workflow notebook.
+
+Caption ownership is resolved by one non-destructive, class-aware association
+stage. Explicit `Figure`, `Table`, `Equation`, `Algorithm`, and `Listing`
+identifiers constrain eligible parent classes; detector-only captions use the same
+geometry, column, direction, blocker, and ambiguity checks. Every candidate emits
+an associated, unresolved, or unattached relationship, and no caption association
+resizes, reclassifies, suppresses, or silently selects a parent by input order.
+All ownership thresholds live in the typed `caption_association` configuration
+section and the effective values are captured with the run configuration.
+
 ## Logical table context
 
 After the core filters and reading-order assignment, the package creates
@@ -89,6 +162,13 @@ generic lexical and optional typography evidence, structural stopping boundaries
 and exclusive candidate ownership. Results are available in
 `PipelineResult.logical_tables`, each page's `logical_tables` field, diagnostics,
 the optional table-context overlay, and `logical_tables.jsonl`.
+
+Every run also exports `stage_trace.jsonl`. The trace records compact counts by
+page and class, added/removed region IDs, relationship and decision counts, and
+geometry/type changes, stable content digests, elapsed time, and
+geometry/identity/hierarchy invariants after each major stage. The notebook
+displays this trace directly, making the earliest divergent stage visible without
+diffing full region payloads or rerunning OCR and model inference.
 
 Caption association is seed anchored: a detector `Caption` region or a generalized
 table-label prefix first establishes a caption-to-table candidate. Once that
@@ -171,3 +251,27 @@ change, compare a fixed reference run against the original notebook for:
 6. overlay dimensions, labels, geometry, and representative visual diffs.
 
 Algorithmic cleanup should be committed separately from output-equivalence work.
+
+## Configuration precedence
+
+`PipelineConfig.load()` is the authoritative loader. Values are merged in the
+following order: typed defaults, the selected YAML profile, `PHASE1_*` environment
+variables, and explicit notebook/CLI overrides. Unknown YAML sections and fields are
+rejected. The complete effective configuration, its profile path, value provenance,
+and the captured legacy-core environment are written to `effective_config.json`.
+`PipelineConfig.from_env()` remains a compatibility wrapper around the same loader.
+The preserved core executes against the captured configuration snapshot with ambient
+`PHASE1_*` variables isolated for reproducible runs.
+
+## Generalized heuristic policy
+
+Publisher vocabulary is stored in named data profiles rather than embedded in
+destructive filter conditions. The default `confirmatory` mode requires publisher
+lexical evidence to agree with generic page geometry and title/body structure;
+`evidence_only` records matches without changing output. A conservative document-
+family classifier reports its signals and falls back to `unknown`. Evidence,
+document-family signals, and content-policy decisions are exported in
+`pipeline_diagnostics.json`. Consumer choices
+for references, acknowledgements, declarations, appendices, supplementary sections,
+and front matter are configured separately from layout-noise correction. See
+`HEURISTICS.md` for the active destructive-rule inventory and safeguards.

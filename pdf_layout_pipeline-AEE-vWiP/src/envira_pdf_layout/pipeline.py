@@ -3,18 +3,32 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
-
-from copy import deepcopy
+import platform
+from time import perf_counter
 
 from .caption_overlap import build_caption_groups
+from .caption_association import associate_captions
+from .artifact_validation import validate_relationship_graph
 from .independent_core import run_independent_core
-from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
+from .layout_overlap import resolve_layout_overlaps
+from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
+from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
+from .region_index import RegionIndex
 
 
 def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
+    started = perf_counter()
     result = run_independent_core(conversion, page_set, config)
+    core_snapshot = snapshot(
+        "independent_core",
+        result.final_regions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace = [core_snapshot]
+    result.filtered_regions = result.final_regions
+    result.diagnostics["effective_config"] = config.to_dict()
     try:
         docling_version = version("docling")
     except PackageNotFoundError:
@@ -28,33 +42,110 @@ def run_layout_pipeline(conversion, page_set, config):
             region.get("score") is not None for region in result.raw_regions
         ),
         "nms_configuration": "not_exposed_by_pipeline",
+        "python_version": platform.python_version(),
+        "dependency_versions": {
+            package: _package_version(package)
+            for package in ("PyMuPDF", "numpy", "opencv-python-headless", "pandas")
+        },
     }
     resolution_input = list(result.final_regions)
-    if config.overlap_resolution.preserve_authoritative_nested_regions:
-        existing_ids = {str(region["layout_region_id"]) for region in resolution_input}
-        for excluded in result.excluded_by_stage.get("nested_assets", []):
-            region_id = str(excluded.get("layout_region_id"))
-            if not region_id or region_id in existing_ids:
-                continue
-            recovered = deepcopy(excluded)
-            recovered["authoritative_filter_disposition"] = "recovered_for_hierarchy"
-            recovered["emission_policy"] = "emit_as_nested_child"
-            resolution_input.append(recovered)
-            existing_ids.add(region_id)
+    started = perf_counter()
     resolution = resolve_layout_overlaps(
-        resolution_input, result.pages, config.overlap_resolution
+        resolution_input,
+        result.pages,
+        config.overlap_resolution,
+        config.containment,
     )
     result.resolved_regions = resolution.regions
     result.layout_relationships = list(resolution.relationships)
-    # Backward-compatible name used by notebook caption inspection.  The value
-    # now contains the complete geometric, class-aware relationship graph.
-    result.caption_overlap_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
-    semantic_associations = associate_attachable_context(
-        result.resolved_regions, result.pages
+    overlap_snapshot = snapshot(
+        "overlap_resolution",
+        result.resolved_regions,
+        previous=core_snapshot,
+        relationships=result.layout_relationships,
+        decisions=result.resolution_decisions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace.append(overlap_snapshot)
+    region_index = RegionIndex.build(result.resolved_regions, result.pages)
+    containment_metrics: dict[str, int] = {}
+    started = perf_counter()
+    proposals = analyze_nested_containment(
+        result.resolved_regions,
+        result.layout_relationships,
+        config=config.containment,
+        index=region_index,
+        metrics=containment_metrics,
+    )
+    hierarchy = resolve_nested_hierarchy(
+        result.resolved_regions, proposals, config.containment
+    )
+    result.resolved_regions = hierarchy.regions
+    result.physical_regions = hierarchy.regions
+    result.top_level_regions = hierarchy.top_level_regions
+    result.nested_regions = hierarchy.nested_regions
+    hierarchy_snapshot = snapshot(
+        "nested_hierarchy",
+        result.resolved_regions,
+        previous=overlap_snapshot,
+        relationships=hierarchy.relationships,
+        decisions=hierarchy.decisions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    hierarchy_snapshot["top_level_count"] = len(result.top_level_regions)
+    hierarchy_snapshot["nested_count"] = len(result.nested_regions)
+    hierarchy_snapshot["invariants"]["partition_valid"] = len(
+        result.physical_regions
+    ) == len(result.top_level_regions) + len(result.nested_regions)
+    result.stage_trace.append(hierarchy_snapshot)
+    hierarchy_snapshot["work"] = containment_metrics
+    # Replace observational candidates with exactly one authoritative outcome.
+    result.layout_relationships = [
+        relation
+        for relation in result.layout_relationships
+        if relation.get("kind") != "CONTAINMENT_CANDIDATE"
+    ]
+    result.layout_relationships.extend(hierarchy.relationships)
+    result.resolution_decisions.extend(hierarchy.decisions)
+    # Backward-compatible caption inspection now receives authoritative rather
+    # than provisional containment outcomes.
+    result.caption_overlap_relationships = list(result.layout_relationships)
+    started = perf_counter()
+    caption_metrics: dict[str, int] = {}
+    semantic_associations = associate_captions(
+        result.resolved_regions,
+        result.pages,
+        config=config.caption_association,
+        index=region_index,
+        metrics=caption_metrics,
     )
     result.layout_relationships.extend(semantic_associations)
+    caption_snapshot = snapshot(
+        "caption_association",
+        result.resolved_regions,
+        previous=hierarchy_snapshot,
+        relationships=semantic_associations,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace.append(caption_snapshot)
+    caption_snapshot["work"] = caption_metrics
+    result.diagnostics["caption_association"] = {
+        "candidate_count": len(semantic_associations),
+        "associated_count": sum(
+            relation["status"] == "associated" for relation in semantic_associations
+        ),
+        "ambiguous_count": sum(
+            relation["status"] == "unresolved_conflict"
+            for relation in semantic_associations
+        ),
+        "unattached_count": sum(
+            relation["status"] == "no_compatible_parent"
+            for relation in semantic_associations
+        ),
+        "relationships": semantic_associations,
+    }
     result.diagnostics["caption_overlap"] = {
         "relationship_count": len(result.caption_overlap_relationships),
         "suppressed_duplicate_region_ids": [
@@ -66,20 +157,42 @@ def run_layout_pipeline(conversion, page_set, config):
         "relationship_count": len(result.layout_relationships),
         "decision_count": len(result.resolution_decisions),
         "suppressed_region_count": len(result.suppressed_regions),
-        "recovered_nested_region_count": sum(
-            region.get("authoritative_filter_disposition") == "recovered_for_hierarchy"
-            for region in result.resolved_regions
-        ),
+        "recovered_nested_region_count": 0,
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
+        "work": resolution.diagnostics,
     }
+    previous_ids = {
+        str(decision.get("region_id"))
+        for decision in result.diagnostics.get("nested_assets", {}).get("decisions", [])
+        if decision.get("region_id")
+    }
+    proposal_ids = {str(proposal["child_region_id"]) for proposal in proposals}
+    result.diagnostics["nested_hierarchy"] = {
+        **hierarchy.diagnostics,
+        "relationships": hierarchy.relationships,
+        "decisions": hierarchy.decisions,
+        "top_level_count": len(result.top_level_regions),
+        "nested_count": len(result.nested_regions),
+        "legacy_comparison": {
+            "previous_candidate_ids": sorted(previous_ids),
+            "current_candidate_ids": sorted(proposal_ids),
+            "matched_ids": sorted(previous_ids & proposal_ids),
+            "missing_from_current_ids": sorted(previous_ids - proposal_ids),
+            "new_candidate_ids": sorted(proposal_ids - previous_ids),
+        },
+    }
+    started = perf_counter()
     if config.table_context.enabled:
+        table_metrics: dict[str, int] = {}
         result.logical_tables = associate_table_context(
             result.resolved_regions,
             result.pages,
             document_id=result.document.doc_id,
             config=config.table_context,
             relationships=result.layout_relationships,
+            index=region_index,
+            metrics=table_metrics,
         )
         groups_by_page: dict[int, list[dict]] = {}
         for group in result.logical_tables:
@@ -93,7 +206,10 @@ def run_layout_pipeline(conversion, page_set, config):
                 for group in result.logical_tables
                 for association in group["associations"]
             ],
+            "work": table_metrics,
         }
+        table_elapsed_ms = (perf_counter() - started) * 1000
+        started = perf_counter()
         result.caption_groups = build_caption_groups(
             result.resolved_regions,
             result.logical_tables,
@@ -101,4 +217,37 @@ def run_layout_pipeline(conversion, page_set, config):
             result.pages,
             config.caption_overlap,
         )
+        result.semantic_groups = result.caption_groups
+        caption_group_elapsed_ms = (perf_counter() - started) * 1000
+    else:
+        table_elapsed_ms = 0.0
+        caption_group_elapsed_ms = 0.0
+    final_snapshot = snapshot(
+        "semantic_grouping",
+        result.resolved_regions,
+        previous=caption_snapshot,
+        relationships=result.layout_relationships,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    final_snapshot["logical_table_count"] = len(result.logical_tables)
+    final_snapshot["caption_group_count"] = len(result.caption_groups)
+    final_snapshot["table_context_elapsed_ms"] = round(table_elapsed_ms, 3)
+    final_snapshot["caption_grouping_elapsed_ms"] = round(caption_group_elapsed_ms, 3)
+    graph_validation = validate_relationship_graph(
+        result.resolved_regions, result.layout_relationships
+    )
+    final_snapshot["invariants"]["relationship_graph_valid"] = graph_validation["valid"]
+    result.stage_trace.append(final_snapshot)
+    result.diagnostics["relationship_graph_validation"] = graph_validation
+    result.diagnostics["stage_trace"] = {
+        "validation": validate_trace(result.stage_trace),
+        "stages": result.stage_trace,
+    }
     return result
+
+
+def _package_version(package: str) -> str:
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return "unknown"
