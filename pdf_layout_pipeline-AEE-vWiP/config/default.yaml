@@ -12,6 +12,11 @@ headers:
   enabled: true
 figures:
   complete_caption_anchored: true
+  max_completion_area_multiplier: 4.0
+  max_completion_page_area_ratio: 0.65
+  max_completion_edge_growth_ratio: 0.45
+  completion_paragraph_min_chars: 80
+  completion_min_assignment_score: 7.0
 footer:
   enabled: true
 tail:
@@ -48,8 +53,29 @@ overlap_resolution:
   duplicate_iou: 0.90
   duplicate_edge_page_ratio: 0.003
   duplicate_area_ratio: 0.85
-  nested_containment: 0.92
   fragment_horizontal_overlap: 0.50
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
   preserve_authoritative_nested_regions: true
+containment:
+  strong_child_coverage: 0.92
+  center_child_coverage: 0.72
+  max_child_parent_area_ratio: 0.85
+  panel_label_max_chars: 12
+  body_paragraph_min_chars: 80
+  caption_identifier_max_chars: 24
+heuristics:
+  # Publisher terms are data-only evidence and cannot delete content without
+  # corroborating generic geometry/structure in confirmatory mode.
+  publisher_profiles: [elsevier_sciencedirect, generic_academic_publishers]
+  publisher_mode: confirmatory
+  document_family: auto
+  language: auto
+content_policy:
+  retain_front_matter: false
+  retain_references: false
+  retain_acknowledgements: false
+  retain_declarations: false
+  retain_appendices: false
+  retain_supplementary_sections: false
+  preserve_excluded_sections_in_secondary_stream: true
