@@ -154,6 +154,26 @@ class OverlapResolutionConfig:
 
 
 @dataclass(frozen=True)
+class CaptionDecompositionConfig:
+    """Controls conservative, provenance-preserving caption decomposition."""
+
+    enabled: bool = True
+    native_text_first: bool = True
+    glm_verify: bool = True
+    glm_endpoint: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    glm_api_key: str = ""
+    glm_model: str = "glm-ocr"
+    glm_timeout_seconds: float = 45.0
+    suspicious_height_page_ratio: float = 0.055
+    suspicious_min_lines: int = 4
+    min_anchor_score: float = 4.0
+    min_split_confidence: float = 0.72
+    min_anchor_separation_lines: float = 0.8
+    parent_max_gap_page_ratio: float = 0.12
+    parent_min_horizontal_overlap: float = 0.16
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     write_raw: bool = True
     write_regions: bool = True
@@ -175,6 +195,9 @@ class PipelineConfig:
     caption_overlap: CaptionOverlapConfig = field(default_factory=CaptionOverlapConfig)
     overlap_resolution: OverlapResolutionConfig = field(
         default_factory=OverlapResolutionConfig
+    )
+    caption_decomposition: CaptionDecompositionConfig = field(
+        default_factory=CaptionDecompositionConfig
     )
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
@@ -249,6 +272,17 @@ class PipelineConfig:
             page1=Page1FilterConfig(
                 abstract_aliases=aliases or ("Abstract", "Summary")
             ),
+            caption_decomposition=CaptionDecompositionConfig(
+                enabled=_flag("PHASE1_CAPTION_DECOMPOSITION", True),
+                native_text_first=_flag("PHASE1_CAPTION_NATIVE_TEXT_FIRST", True),
+                glm_verify=_flag("PHASE1_GLM_OCR_VERIFY", True),
+                glm_endpoint=os.environ.get(
+                    "PHASE1_GLM_OCR_ENDPOINT",
+                    "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                ),
+                glm_api_key=os.environ.get("PHASE1_GLM_OCR_API_KEY", ""),
+                glm_model=os.environ.get("PHASE1_GLM_OCR_MODEL", "glm-ocr"),
+            ),
             exclude_labels=excluded,
         )
         config.validate()
@@ -317,3 +351,20 @@ class PipelineConfig:
         for name in ("duplicate_edge_page_ratio", "fragment_max_gap_page_ratio"):
             if getattr(generalized, name) < 0:
                 raise ValueError(f"overlap resolution {name} must be non-negative")
+        decomposition = self.caption_decomposition
+        for name in (
+            "suspicious_height_page_ratio",
+            "min_split_confidence",
+            "parent_max_gap_page_ratio",
+            "parent_min_horizontal_overlap",
+        ):
+            if not 0 <= getattr(decomposition, name) <= 1:
+                raise ValueError(f"caption decomposition {name} must be in [0, 1]")
+        if decomposition.suspicious_min_lines < 2:
+            raise ValueError(
+                "caption decomposition suspicious_min_lines must be at least 2"
+            )
+        if decomposition.min_anchor_score < 0:
+            raise ValueError(
+                "caption decomposition min_anchor_score must be non-negative"
+            )

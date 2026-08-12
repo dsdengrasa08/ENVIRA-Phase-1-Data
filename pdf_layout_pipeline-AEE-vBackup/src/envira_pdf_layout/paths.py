@@ -25,7 +25,7 @@ def safe_name(value: str) -> str:
 
 
 def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
-    import fitz
+    import pymupdf
 
     source = config.document.source_pdf.expanduser().resolve()
     if not source.is_file():
@@ -37,7 +37,7 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
     persistent = input_dir / f"{doc_id}.pdf"
     if not persistent.exists() or not config.document.prefer_persistent_copy:
         shutil.copy2(source, persistent)
-    with fitz.open(persistent) as pdf:
+    with pymupdf.open(persistent) as pdf:
         total = int(pdf.page_count)
     start = config.document.page_start
     end = min(config.document.page_end or total, total)
