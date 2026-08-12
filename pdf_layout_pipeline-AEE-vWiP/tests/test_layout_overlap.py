@@ -202,3 +202,29 @@ def test_disabled_resolution_still_preserves_source_and_resolved_boxes():
     )
     assert result.relationships == []
     assert result.regions[0]["source_bbox_px"] == [1, 2, 3, 4]
+    assert result.diagnostics == {"candidate_pairs": 0, "pairs_scored": 0}
+
+
+def test_resolution_reports_deterministic_work_counters():
+    result = resolve_layout_overlaps(
+        [
+            region("a", "Text", [0, 0, 100, 50], "one"),
+            region("b", "Text", [0, 40, 100, 90], "two"),
+        ],
+        PAGES,
+    )
+    assert result.diagnostics["candidate_pairs"] == 1
+    assert result.diagnostics["pairs_scored"] == 1
+    assert result.diagnostics["relationships_emitted"] == 1
+
+
+def test_sweep_line_prunes_separated_regions_before_feature_scoring():
+    regions = [
+        region(f"r{i}", "Text", [0, i * 100, 50, i * 100 + 10], str(i))
+        for i in range(20)
+    ]
+    result = resolve_layout_overlaps(
+        regions,
+        [{"page_number": 1, "image_width_px": 100, "image_height_px": 2000}],
+    )
+    assert result.diagnostics["pairs_scored"] < len(regions)

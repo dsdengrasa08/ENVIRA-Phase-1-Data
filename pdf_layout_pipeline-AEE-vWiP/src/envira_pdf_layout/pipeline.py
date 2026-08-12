@@ -12,6 +12,7 @@ from .layout_overlap import resolve_layout_overlaps
 from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
 from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
+from .region_index import RegionIndex
 
 
 def run_layout_pipeline(conversion, page_set, config):
@@ -61,11 +62,15 @@ def run_layout_pipeline(conversion, page_set, config):
         elapsed_ms=(perf_counter() - started) * 1000,
     )
     result.stage_trace.append(overlap_snapshot)
+    region_index = RegionIndex.build(result.resolved_regions, result.pages)
+    containment_metrics: dict[str, int] = {}
     started = perf_counter()
     proposals = analyze_nested_containment(
         result.resolved_regions,
         result.layout_relationships,
         config=config.containment,
+        index=region_index,
+        metrics=containment_metrics,
     )
     hierarchy = resolve_nested_hierarchy(
         result.resolved_regions, proposals, config.containment
@@ -88,6 +93,7 @@ def run_layout_pipeline(conversion, page_set, config):
         result.physical_regions
     ) == len(result.top_level_regions) + len(result.nested_regions)
     result.stage_trace.append(hierarchy_snapshot)
+    hierarchy_snapshot["work"] = containment_metrics
     # Replace observational candidates with exactly one authoritative outcome.
     result.layout_relationships = [
         relation
@@ -100,8 +106,13 @@ def run_layout_pipeline(conversion, page_set, config):
     # than provisional containment outcomes.
     result.caption_overlap_relationships = list(result.layout_relationships)
     started = perf_counter()
+    caption_metrics: dict[str, int] = {}
     semantic_associations = associate_captions(
-        result.resolved_regions, result.pages, config=config.caption_association
+        result.resolved_regions,
+        result.pages,
+        config=config.caption_association,
+        index=region_index,
+        metrics=caption_metrics,
     )
     result.layout_relationships.extend(semantic_associations)
     caption_snapshot = snapshot(
@@ -112,6 +123,7 @@ def run_layout_pipeline(conversion, page_set, config):
         elapsed_ms=(perf_counter() - started) * 1000,
     )
     result.stage_trace.append(caption_snapshot)
+    caption_snapshot["work"] = caption_metrics
     result.diagnostics["caption_association"] = {
         "candidate_count": len(semantic_associations),
         "associated_count": sum(
@@ -141,6 +153,7 @@ def run_layout_pipeline(conversion, page_set, config):
         "recovered_nested_region_count": 0,
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
+        "work": resolution.diagnostics,
     }
     previous_ids = {
         str(decision.get("region_id"))
@@ -164,12 +177,15 @@ def run_layout_pipeline(conversion, page_set, config):
     }
     started = perf_counter()
     if config.table_context.enabled:
+        table_metrics: dict[str, int] = {}
         result.logical_tables = associate_table_context(
             result.resolved_regions,
             result.pages,
             document_id=result.document.doc_id,
             config=config.table_context,
             relationships=result.layout_relationships,
+            index=region_index,
+            metrics=table_metrics,
         )
         groups_by_page: dict[int, list[dict]] = {}
         for group in result.logical_tables:
@@ -183,7 +199,10 @@ def run_layout_pipeline(conversion, page_set, config):
                 for group in result.logical_tables
                 for association in group["associations"]
             ],
+            "work": table_metrics,
         }
+        table_elapsed_ms = (perf_counter() - started) * 1000
+        started = perf_counter()
         result.caption_groups = build_caption_groups(
             result.resolved_regions,
             result.logical_tables,
@@ -192,6 +211,10 @@ def run_layout_pipeline(conversion, page_set, config):
             config.caption_overlap,
         )
         result.semantic_groups = result.caption_groups
+        caption_group_elapsed_ms = (perf_counter() - started) * 1000
+    else:
+        table_elapsed_ms = 0.0
+        caption_group_elapsed_ms = 0.0
     final_snapshot = snapshot(
         "semantic_grouping",
         result.resolved_regions,
@@ -201,6 +224,8 @@ def run_layout_pipeline(conversion, page_set, config):
     )
     final_snapshot["logical_table_count"] = len(result.logical_tables)
     final_snapshot["caption_group_count"] = len(result.caption_groups)
+    final_snapshot["table_context_elapsed_ms"] = round(table_elapsed_ms, 3)
+    final_snapshot["caption_grouping_elapsed_ms"] = round(caption_group_elapsed_ms, 3)
     result.stage_trace.append(final_snapshot)
     result.diagnostics["stage_trace"] = {
         "validation": validate_trace(result.stage_trace),

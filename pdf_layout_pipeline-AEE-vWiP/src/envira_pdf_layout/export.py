@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+from .stage_trace import tabular_trace
 from .results import summary_dataframe
 from .types import ExportManifest
 
@@ -20,11 +21,20 @@ def export_pipeline_result(run):
     )
     paths.raw_markdown.write_text(run.raw_markdown, encoding="utf-8")
     paths.effective_config_json.write_text(
-        json.dumps(run.diagnostics.get("effective_config", {}), ensure_ascii=False, indent=2),
+        json.dumps(
+            run.diagnostics.get("effective_config", {}), ensure_ascii=False, indent=2
+        ),
         encoding="utf-8",
     )
+    diagnostics = dict(run.diagnostics)
+    if "stage_trace" in diagnostics:
+        diagnostics["stage_trace"] = {
+            **diagnostics["stage_trace"],
+            "stages": tabular_trace(run.stage_trace),
+            "signature_storage": "stage_trace.jsonl",
+        }
     paths.diagnostics_json.write_text(
-        json.dumps(run.diagnostics, ensure_ascii=False, indent=2, default=str),
+        json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     _write_jsonl(paths.page_records_jsonl, run.pages)
@@ -36,7 +46,9 @@ def export_pipeline_result(run):
     _write_jsonl(paths.nested_regions_jsonl, run.nested_regions)
     _write_jsonl(
         paths.figure_completion_proposals_jsonl,
-        run.diagnostics.get("figure_completion", {}).get("validation", {}).get("proposals", []),
+        run.diagnostics.get("figure_completion", {})
+        .get("validation", {})
+        .get("proposals", []),
     )
     _write_jsonl(paths.caption_relationships_jsonl, run.caption_overlap_relationships)
     _write_jsonl(paths.caption_groups_jsonl, run.caption_groups)

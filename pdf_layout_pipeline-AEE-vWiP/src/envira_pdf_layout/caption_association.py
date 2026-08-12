@@ -7,13 +7,13 @@ never resized, reclassified, or suppressed.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 import re
 from typing import Any
 
 from .config import CaptionAssociationConfig
 from .types import LayoutRegion
+from .region_index import RegionIndex
 
 _REFERENCE_RE = re.compile(
     r"^\s*(?P<label>(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
@@ -97,6 +97,8 @@ def associate_captions(
     pages: list[dict[str, Any]],
     *,
     config: CaptionAssociationConfig | None = None,
+    index: RegionIndex | None = None,
+    metrics: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Assign each caption candidate to at most one compatible parent.
 
@@ -107,28 +109,38 @@ def associate_captions(
     config = config or CaptionAssociationConfig()
     if not config.enabled:
         return []
-    page_map = {int(page["page_number"]): page for page in pages}
-    by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
-    for region in regions:
-        by_page[int(region["page_number"])].append(region)
+    index = index or RegionIndex.build(regions, pages)
+    metrics = metrics if metrics is not None else {}
+    metrics.update(
+        caption_candidates=0,
+        parent_pairs_considered=0,
+        pairs_scored=0,
+        blocker_queries=0,
+    )
     output: list[dict[str, Any]] = []
-    for page_number, page_regions in sorted(by_page.items()):
-        width, height = _page_size(page_map.get(page_number, {}))
-        parents = [r for r in page_regions if r.get("type") in _PARENT_TYPES]
+    for page_number, page_regions in sorted(index.by_page.items()):
+        width, height = index.page_sizes.get(page_number, (1.0, 1.0))
+        parents = index.types(page_number, *sorted(_PARENT_TYPES))
+        blockers = index.types(page_number, *sorted(_BLOCKER_TYPES))
+        references = {
+            str(region["layout_region_id"]): parse_caption_reference(
+                region.get("text") or region.get("orig")
+            )
+            for region in page_regions
+        }
         candidates = [
             r
             for r in page_regions
-            if r.get("type") == "Caption"
-            or parse_caption_reference(r.get("text") or r.get("orig"))
+            if r.get("type") == "Caption" or references[str(r["layout_region_id"])]
         ]
+        metrics["caption_candidates"] += len(candidates)
         for caption in candidates:
-            reference = parse_caption_reference(
-                caption.get("text") or caption.get("orig")
-            )
+            reference = references[str(caption["layout_region_id"])]
             expected = _EXPECTED_PARENT.get(reference.kind) if reference else None
             cb = list(map(float, caption["bbox_px"]))
             alternatives: list[dict[str, Any]] = []
             for parent in parents:
+                metrics["parent_pairs_considered"] += 1
                 if expected and parent.get("type") not in expected:
                     continue
                 pb = list(map(float, parent["bbox_px"]))
@@ -152,9 +164,10 @@ def associate_captions(
                 blocker = _blocker_between(
                     caption,
                     parent,
-                    page_regions,
+                    list(blockers),
                     config.blocker_horizontal_overlap_ratio,
                 )
+                metrics["blocker_queries"] += 1
                 if blocker:
                     continue
                 direction_match = (
@@ -170,6 +183,7 @@ def associate_captions(
                     + 0.15 * bool(reference)
                     + 0.10 * direction_match
                 )
+                metrics["pairs_scored"] += 1
                 alternatives.append(
                     {
                         "parent_region_id": str(parent["layout_region_id"]),

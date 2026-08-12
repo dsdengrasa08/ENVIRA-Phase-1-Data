@@ -64,6 +64,12 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   not prevent fallback attempts on later pages.
 - `stage_trace.py`: compact stage-by-stage region counts, ID deltas, relationship
   counts, and invariants for locating the first stage that introduced a regression.
+- `region_index.py`: immutable per-collection page, ID, type, page-size, and
+  normalized-text indexes shared by hierarchy, caption, and table-context stages.
+
+Geometry-heavy stages publish deterministic work counters alongside elapsed time.
+Overlap observations are reused by hierarchy policy, and the shared region index
+prevents repeated page/type/text indexing without introducing a mutable global cache.
 
 ## Generalized overlap resolution
 

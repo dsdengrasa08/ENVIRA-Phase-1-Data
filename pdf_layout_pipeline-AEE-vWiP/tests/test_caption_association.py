@@ -60,3 +60,21 @@ def test_input_order_does_not_change_ambiguous_outcome():
     reverse = associate_captions(list(reversed(parents)) + [caption], PAGES)
     assert forward == reverse
     assert forward[0]["status"] == "unresolved_conflict"
+
+
+def test_association_exposes_deterministic_work_counters():
+    metrics = {}
+    associate_captions(
+        [
+            region("figure", "Figure", [100, 100, 400, 300]),
+            region("caption", "Caption", [100, 305, 400, 340], "Figure 1. Test"),
+        ],
+        PAGES,
+        metrics=metrics,
+    )
+    assert metrics == {
+        "caption_candidates": 1,
+        "parent_pairs_considered": 1,
+        "pairs_scored": 1,
+        "blocker_queries": 1,
+    }

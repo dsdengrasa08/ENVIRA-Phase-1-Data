@@ -10,6 +10,7 @@ from typing import Any
 from .config import ContainmentConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
+from .region_index import RegionIndex
 
 CONTAINER_TYPES = {"Figure", "Table", "List", "Form", "Key-value"}
 TEXT_TYPES = {"Text", "Title", "Section-header", "Caption", "Footnote", "Reference"}
@@ -167,13 +168,19 @@ def analyze_nested_containment(
     observations: list[dict[str, Any]] | None = None,
     *,
     config: ContainmentConfig | None = None,
+    index: RegionIndex | None = None,
+    metrics: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate page-local proposals without removing or mutating any region."""
     config = config or ContainmentConfig()
-    by_id = {str(region["layout_region_id"]): region for region in regions}
+    index = index or RegionIndex.build(regions, [])
+    by_id = index.by_id
+    metrics = metrics if metrics is not None else {}
+    metrics.update(observations_examined=0, pairs_scored=0, proposals_emitted=0)
     if observations is not None:
         proposals = []
         for relation in observations:
+            metrics["observations_examined"] += 1
             if relation.get("kind") != "CONTAINMENT_CANDIDATE":
                 continue
             parent_id = str(relation["candidate_parent_region_id"])
@@ -181,23 +188,45 @@ def analyze_nested_containment(
             if parent_id not in by_id or child_id not in by_id:
                 continue
             parent, child = by_id[parent_id], by_id[child_id]
-            proposals.append(
-                _proposal(child, parent, containment_features(child, parent))
-            )
+            observed = relation.get("features")
+            features = containment_features(child, parent)
+            if observed:
+                child_is_left = relation.get("left_region_id") == child_id
+                features.update(
+                    {
+                        "child_coverage": observed[
+                            "a_containment" if child_is_left else "b_containment"
+                        ],
+                        "parent_coverage": observed[
+                            "b_containment" if child_is_left else "a_containment"
+                        ],
+                        "child_center_inside_parent": observed[
+                            "a_center_inside_b"
+                            if child_is_left
+                            else "b_center_inside_a"
+                        ],
+                        "text_relation": observed.get(
+                            "text_relation", features["text_relation"]
+                        ),
+                    }
+                )
+            else:
+                metrics["pairs_scored"] += 1
+            proposals.append(_proposal(child, parent, features))
+        metrics["proposals_emitted"] = len(proposals)
         return proposals
-    by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
-    for region in regions:
-        by_page[int(region["page_number"])].append(region)
     proposals = []
-    for page_number, page_regions in by_page.items():
+    for page_regions in index.by_page.values():
         parents = page_regions
         for child in page_regions:
             child_id = str(child["layout_region_id"])
             for parent in parents:
+                metrics["observations_examined"] += 1
                 parent_id = str(parent["layout_region_id"])
                 if child_id == parent_id:
                     continue
                 features = containment_features(child, parent)
+                metrics["pairs_scored"] += 1
                 if not (
                     features["child_coverage"] >= config.strong_child_coverage
                     or (
@@ -209,6 +238,7 @@ def analyze_nested_containment(
                 if features["parent_area"] <= features["child_area"]:
                     continue
                 proposals.append(_proposal(child, parent, features))
+    metrics["proposals_emitted"] = len(proposals)
     return proposals
 
 

@@ -232,6 +232,7 @@ class ResolutionResult:
     relationships: list[dict[str, Any]]
     decisions: list[dict[str, Any]]
     suppressed: list[LayoutRegion]
+    diagnostics: dict[str, Any]
 
 
 def resolve_layout_overlaps(
@@ -252,13 +253,17 @@ def resolve_layout_overlaps(
         region.setdefault("emission_policy", "emit_canonical")
         region.setdefault("geometry_version", 1)
     if not config.enabled:
-        return ResolutionResult(working, [], [], [])
+        return ResolutionResult(
+            working, [], [], [], {"candidate_pairs": 0, "pairs_scored": 0}
+        )
     page_map = {int(p["page_number"]): p for p in pages}
     by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
     for region in working:
         by_page[int(region["page_number"])].append(region)
     relationships: list[dict[str, Any]] = []
     duplicate_edges: list[tuple[str, str]] = []
+    candidate_pairs = 0
+    pairs_scored = 0
     by_id = {str(r["layout_region_id"]): r for r in working}
     for page_number, page_regions in by_page.items():
         page = page_map.get(page_number, {"page_number": page_number})
@@ -266,7 +271,9 @@ def resolve_layout_overlaps(
         for a, b in _candidate_pairs(
             page_regions, height, config.fragment_max_gap_page_ratio
         ):
+            candidate_pairs += 1
             f = overlap_features(a, b, page)
+            pairs_scored += 1
             kind, reason, proposed_action = _classify(a, b, f, config, containment)
             if kind == "INDEPENDENT":
                 continue
@@ -414,7 +421,18 @@ def resolve_layout_overlaps(
             top_order += 1
             region["resolved_reading_order"] = top_order
     suppressed = [deepcopy(by_id[rid]) for rid in duplicate_of]
-    return ResolutionResult(output, relationships, decisions, suppressed)
+    return ResolutionResult(
+        output,
+        relationships,
+        decisions,
+        suppressed,
+        {
+            "candidate_pairs": candidate_pairs,
+            "pairs_scored": pairs_scored,
+            "relationships_emitted": len(relationships),
+            "duplicate_edges": len(duplicate_edges),
+        },
+    )
 
 
 def associate_attachable_context(
