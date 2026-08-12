@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 import os
 from pathlib import Path
 
@@ -150,7 +150,7 @@ class OverlapResolutionConfig:
     fragment_horizontal_overlap: float = 0.50
     fragment_max_gap_page_ratio: float = 0.012
     boundary_overlap_ratio: float = 0.20
-    preserve_authoritative_nested_regions: bool = True
+    preserve_filtered_nested_regions: bool = True
 
 
 @dataclass(frozen=True)
@@ -198,6 +198,14 @@ class CaptionValidationConfig:
 
 
 @dataclass(frozen=True)
+class CaptionOCRConfig:
+    """Optional dotted-path provider for selective caption line extraction."""
+
+    enabled: bool = False
+    provider: str = ""
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     write_raw: bool = True
     write_regions: bool = True
@@ -223,21 +231,46 @@ class PipelineConfig:
     caption_validation: CaptionValidationConfig = field(
         default_factory=CaptionValidationConfig
     )
+    caption_ocr: CaptionOCRConfig = field(default_factory=CaptionOCRConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     exclude_labels: frozenset[str] = frozenset()
 
     @classmethod
+    def from_yaml(cls, *paths: str | Path) -> "PipelineConfig":
+        """Load one or more YAML profiles, with later files taking precedence."""
+        import yaml
+
+        config = cls()
+        for raw_path in paths:
+            path = Path(raw_path).expanduser().resolve()
+            values = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if not isinstance(values, dict):
+                raise ValueError(f"Configuration root must be a mapping: {path}")
+            config = _replace_dataclass(config, values)
+        config.validate()
+        return config
+
+    @classmethod
     def from_env(
-        cls, source_pdf: str | Path | None = None, **overrides: object
+        cls,
+        source_pdf: str | Path | None = None,
+        *,
+        profiles: tuple[str | Path, ...] | None = None,
+        **overrides: object,
     ) -> "PipelineConfig":
-        project = Path(os.environ.get("PHASE1_PROJECT_DIR", RuntimeConfig.project_dir))
-        document = DocumentConfig(
+        base = cls.from_yaml(*profiles) if profiles else cls()
+        project = Path(os.environ.get("PHASE1_PROJECT_DIR", base.runtime.project_dir))
+        document = replace(
+            base.document,
             source_pdf=Path(
                 source_pdf
-                or os.environ.get("PHASE1_SOURCE_PDF", DocumentConfig.source_pdf)
+                or os.environ.get("PHASE1_SOURCE_PDF", base.document.source_pdf)
             ),
             page_start=int(
-                overrides.get("page_start", os.environ.get("PHASE1_PAGE_START", 1))
+                overrides.get(
+                    "page_start",
+                    os.environ.get("PHASE1_PAGE_START", base.document.page_start),
+                )
             ),
             page_end=(
                 overrides.get("page_end")
@@ -245,56 +278,84 @@ class PipelineConfig:
                 else (
                     int(os.environ["PHASE1_PAGE_END"])
                     if os.environ.get("PHASE1_PAGE_END", "").strip()
-                    else None
+                    else base.document.page_end
                 )
             ),
             render_dpi=int(
-                overrides.get("render_dpi", os.environ.get("PHASE1_RENDER_DPI", 180))
+                overrides.get(
+                    "render_dpi",
+                    os.environ.get("PHASE1_RENDER_DPI", base.document.render_dpi),
+                )
             ),
-            run_id=str(overrides.get("run_id", os.environ.get("PHASE1_RUN_ID", ""))),
-            prefer_persistent_copy=_flag("PHASE1_PREFER_LOCAL_INPUT_COPY", True),
+            run_id=str(
+                overrides.get(
+                    "run_id", os.environ.get("PHASE1_RUN_ID", base.document.run_id)
+                )
+            ),
+            prefer_persistent_copy=_flag(
+                "PHASE1_PREFER_LOCAL_INPUT_COPY", base.document.prefer_persistent_copy
+            ),
         )
-        runtime = RuntimeConfig(
-            use_google_drive=_flag("PHASE1_USE_GOOGLE_DRIVE", True),
+        runtime = replace(
+            base.runtime,
+            use_google_drive=_flag(
+                "PHASE1_USE_GOOGLE_DRIVE", base.runtime.use_google_drive
+            ),
             drive_mount_point=Path(
-                os.environ.get("PHASE1_GDRIVE_MOUNT_POINT", "/content/drive")
+                os.environ.get(
+                    "PHASE1_GDRIVE_MOUNT_POINT", base.runtime.drive_mount_point
+                )
             ),
             project_dir=project,
-            offline=_flag("PHASE1_OFFLINE_MODE", False),
-            skip_pip_install=_flag("PHASE1_SKIP_PIP_INSTALL", False),
+            offline=_flag("PHASE1_OFFLINE_MODE", base.runtime.offline),
+            skip_pip_install=_flag(
+                "PHASE1_SKIP_PIP_INSTALL", base.runtime.skip_pip_install
+            ),
         )
-        docling = DoclingConfig(
+        docling = replace(
+            base.docling,
             artifacts_dir=Path(
                 os.environ.get(
                     "PHASE1_DOCLING_ARTIFACTS_DIR", project / "artifacts/docling_models"
                 )
             ),
-            use_local_artifacts=_flag("PHASE1_USE_LOCAL_DOCLING_ARTIFACTS", True),
-            require_saved_models=_flag("PHASE1_REQUIRE_SAVED_DOCLING_MODELS", True),
-            auto_download_models=_flag("PHASE1_AUTO_DOWNLOAD_DOCLING_MODELS", False),
-            force_redownload_models=_flag(
-                "PHASE1_FORCE_REDOWNLOAD_DOCLING_MODELS", False
+            use_local_artifacts=_flag(
+                "PHASE1_USE_LOCAL_DOCLING_ARTIFACTS", base.docling.use_local_artifacts
             ),
-            do_ocr=_flag("PHASE1_DOCLING_DO_OCR", False),
+            require_saved_models=_flag(
+                "PHASE1_REQUIRE_SAVED_DOCLING_MODELS", base.docling.require_saved_models
+            ),
+            auto_download_models=_flag(
+                "PHASE1_AUTO_DOWNLOAD_DOCLING_MODELS", base.docling.auto_download_models
+            ),
+            force_redownload_models=_flag(
+                "PHASE1_FORCE_REDOWNLOAD_DOCLING_MODELS",
+                base.docling.force_redownload_models,
+            ),
+            do_ocr=_flag("PHASE1_DOCLING_DO_OCR", base.docling.do_ocr),
         )
         aliases = tuple(
             x.strip()
             for x in os.environ.get(
-                "PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES", "Abstract,Summary"
+                "PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES",
+                ",".join(base.page1.abstract_aliases),
             ).split(",")
             if x.strip()
         )
         excluded = frozenset(
             x.strip().lower()
-            for x in os.environ.get("PHASE1_DOCLING_EXCLUDE_LABELS", "").split(",")
+            for x in os.environ.get(
+                "PHASE1_DOCLING_EXCLUDE_LABELS", ",".join(base.exclude_labels)
+            ).split(",")
             if x.strip()
         )
-        config = cls(
+        config = replace(
+            base,
             runtime=runtime,
             document=document,
             docling=docling,
-            page1=Page1FilterConfig(
-                abstract_aliases=aliases or ("Abstract", "Summary")
+            page1=replace(
+                base.page1, abstract_aliases=aliases or ("Abstract", "Summary")
             ),
             exclude_labels=excluded,
         )
@@ -387,3 +448,29 @@ class PipelineConfig:
         for name in ("duplicate_edge_page_ratio", "fragment_max_gap_page_ratio"):
             if getattr(generalized, name) < 0:
                 raise ValueError(f"overlap resolution {name} must be non-negative")
+
+
+def _replace_dataclass(instance, values: dict):
+    """Recursively apply a YAML mapping to a dataclass with strict key checking."""
+    known = {item.name: item for item in fields(instance)}
+    unknown = set(values) - set(known)
+    if unknown:
+        raise ValueError(
+            f"Unknown {type(instance).__name__} configuration keys: {sorted(unknown)}"
+        )
+    updates = {}
+    for name, value in values.items():
+        current = getattr(instance, name)
+        if is_dataclass(current):
+            if not isinstance(value, dict):
+                raise ValueError(f"Configuration section {name!r} must be a mapping")
+            updates[name] = _replace_dataclass(current, value)
+        elif isinstance(current, Path) or (current is None and name.endswith("_dir")):
+            updates[name] = None if value is None else Path(value)
+        elif isinstance(current, tuple) and isinstance(value, list):
+            updates[name] = tuple(value)
+        elif isinstance(current, frozenset):
+            updates[name] = frozenset(value)
+        else:
+            updates[name] = value
+    return replace(instance, **updates)

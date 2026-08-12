@@ -105,6 +105,7 @@ class PipelineResult:
     layout_relationships: list[dict[str, Any]] = field(default_factory=list)
     resolution_decisions: list[dict[str, Any]] = field(default_factory=list)
     suppressed_regions: list[LayoutRegion] = field(default_factory=list)
+    config: Any = None
 
 
 @dataclass(frozen=True)
