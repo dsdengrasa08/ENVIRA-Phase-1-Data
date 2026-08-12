@@ -53,3 +53,10 @@ overlap_resolution:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
   preserve_authoritative_nested_regions: true
+caption_decomposition:
+  enabled: true
+  native_text_first: true
+  glm_verify: true
+  # Every detected Caption crop is scanned when PHASE1_GLM_OCR_API_KEY is set.
+  # PHASE1_GLM_OCR_ENDPOINT can override the default BigModel chat endpoint.
+  glm_model: glm-ocr

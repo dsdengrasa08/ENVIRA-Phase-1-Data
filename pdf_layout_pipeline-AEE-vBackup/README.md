@@ -49,6 +49,26 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `layout_overlap.py`: generalized class-family relationship graph, immutable
   source/resolved geometry, complete-link duplicate canonicalization,
   hierarchy/conflict/fragment analysis, and attachable-parent association.
+- `caption_decomposition.py`: native-word-first inspection of suspicious caption
+  boxes, optional GLM-OCR semantic verification, coordinate-based splitting,
+  typed derived captions, and one-to-one compatible asset association.
+
+## Merged-caption decomposition
+
+After overlap normalization and before final caption association, **every**
+detector `Caption` crop is sent to GLM-OCR when credentials are configured. GLM
+returns positioned OCR lines and identifies `Fig`/`Figure`/`Table`/`Tab` labels
+that begin logical captions. Each label starts a derived caption, and its content
+ends immediately before the next label. Split boxes are unions of those actual
+OCR lines rather than equal subdivisions. Figure/table references embedded in a
+sentence do not create anchors. Native PDF words provide a coordinate-bearing
+fallback when GLM is unavailable or returns no valid positioned lines.
+
+GLM-OCR is an optional verifier configured through `PHASE1_GLM_OCR_ENDPOINT`,
+`PHASE1_GLM_OCR_API_KEY`, and `PHASE1_GLM_OCR_MODEL`. The endpoint defaults to
+the BigModel OpenAI-compatible chat-completions URL and can be overridden. All
+scan results, positioned-line sources, anchors, derived IDs, and abstention
+reasons are exposed under the `caption_decomposition` diagnostics entry.
 
 ## Generalized overlap resolution
 
