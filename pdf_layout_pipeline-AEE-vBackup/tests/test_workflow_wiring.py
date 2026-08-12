@@ -11,11 +11,11 @@ def _workflow_source():
     )
 
 
-def test_workflow_loads_the_aee_package_not_an_old_pipeline_directory():
+def test_workflow_loads_the_vbackup_package_with_caption_decomposition():
     source = _workflow_source()
-    assert "pdf_layout_pipeline-AEE/requirements.txt" in source
-    assert 'repo_dir / "pdf_layout_pipeline-AEE"' in source
-    assert 'PROJECT_DIR.name != "pdf_layout_pipeline-AEE"' in source
+    assert "pdf_layout_pipeline-AEE-vBackup/requirements.txt" in source
+    assert 'repo_dir / "pdf_layout_pipeline-AEE-vBackup"' in source
+    assert 'PROJECT_DIR.name != "pdf_layout_pipeline-AEE-vBackup"' in source
 
 
 def test_workflow_displays_resolved_caption_outputs():

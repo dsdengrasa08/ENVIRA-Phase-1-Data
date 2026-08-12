@@ -160,6 +160,30 @@ def test_glm_scans_every_caption_and_uses_label_to_next_label(monkeypatch):
     assert diagnostics[0]["geometry_source"] == "glm_ocr"
 
 
+def test_unlabeled_figure_prefix_is_split_from_later_table_label(monkeypatch):
+    lines = [
+        line("Seasonal variations of daily precipitation and temperature.", 310),
+        line("season in 2006.", 332),
+        line("Table 2", 400),
+        line("Field treatment establishment and management.", 422),
+    ]
+    assets = [
+        region("fig", "Figure", (100, 100, 700, 295)),
+        region("table", "Table", (100, 510, 700, 800)),
+    ]
+    output, diagnostics = run(monkeypatch, lines, assets=assets)
+    captions = [item for item in output if item["type"].endswith(" Caption")]
+    assert [item["type"] for item in captions] == [
+        "Figure Caption",
+        "Table Caption",
+    ]
+    assert captions[0]["text"].startswith("Seasonal variations")
+    assert captions[0]["parent_region_id"] == "fig"
+    assert captions[1]["text"].startswith("Table 2")
+    assert captions[1]["parent_region_id"] == "table"
+    assert diagnostics[0]["detected_anchors"][0]["inferred_from_leading_block"]
+
+
 def test_intervening_paragraph_becomes_its_own_text_region(monkeypatch):
     lines = [
         line("Fig. 1. Plot", 310),

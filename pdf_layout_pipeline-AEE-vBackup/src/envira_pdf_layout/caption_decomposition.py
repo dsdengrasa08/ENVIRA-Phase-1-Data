@@ -268,6 +268,48 @@ def _parent_score(block, anchor, asset, page_height, config):
     return 0.6 * overlap + 0.4 * max(0.0, 1 - gap / config.parent_max_gap_page_ratio)
 
 
+def _leading_caption_anchor(lines, first_anchor_index, assets, page_height, config):
+    """Infer an unlabeled leading caption when a later label starts a new one.
+
+    Docling can emit ``Fig. N`` as a separate tiny nested region while merging
+    the figure description and following ``Table N`` caption into one Caption.
+    In that case the crop contains only the later Table label.  Non-empty lines
+    before that label still form a separate caption when they have a unique,
+    compatible nearby asset.
+    """
+    if first_anchor_index <= 0:
+        return None
+    leading = lines[:first_anchor_index]
+    text = " ".join(line.text for line in leading).strip()
+    if not text:
+        return None
+    box = [
+        min(line.bbox[0] for line in leading),
+        min(line.bbox[1] for line in leading),
+        max(line.bbox[2] for line in leading),
+        max(line.bbox[3] for line in leading),
+    ]
+    ranked = []
+    for asset in assets:
+        inferred = {"kind": str(asset.get("type", "")).casefold()}
+        score = _parent_score(box, inferred, asset, page_height, config)
+        if score is not None:
+            ranked.append((score, asset))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    if not ranked or (len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.15):
+        return None
+    kind = str(ranked[0][1]["type"]).casefold()
+    return {
+        "kind": kind,
+        "number": None,
+        "score": config.min_anchor_score,
+        "fuzzy": False,
+        "text": text,
+        "inferred_from_leading_block": True,
+        "inferred_parent_region_id": str(ranked[0][1]["layout_region_id"]),
+    }
+
+
 def decompose_captions(regions, pages, document, config=None, verifier=None):
     """Return derived regions and complete auditable decomposition diagnostics."""
     config = config or CaptionDecompositionConfig()
@@ -349,6 +391,16 @@ def decompose_captions(regions, pages, document, config=None, verifier=None):
                     explicit.append((index, anchor))
             if explicit:
                 candidates = sorted(dict(explicit).items())
+        if candidates and candidates[0][0] > 0:
+            leading_anchor = _leading_caption_anchor(
+                analysis_lines,
+                candidates[0][0],
+                assets,
+                float(page["image_height_px"]),
+                config,
+            )
+            if leading_anchor:
+                candidates.insert(0, (0, leading_anchor))
         if len(candidates) < 2:
             output.append(region)
             record["status"] = "abstained_insufficient_anchors"
