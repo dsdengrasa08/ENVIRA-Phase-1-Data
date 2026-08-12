@@ -132,7 +132,7 @@ def _suspicious(region, lines, page_height, assets, config) -> tuple[bool, list[
 
 
 class GlmOcrVerifier:
-    """Minimal OpenAI-compatible GLM-OCR verifier returning strict JSON."""
+    """Ask GLM-OCR to transcribe every detected caption into positioned lines."""
 
     def __init__(self, config: CaptionDecompositionConfig):
         self.config = config
@@ -141,21 +141,30 @@ class GlmOcrVerifier:
     def available(self) -> bool:
         return bool(self.config.glm_endpoint and self.config.glm_api_key)
 
-    def verify(self, image_path: str, crop, lines, anchors) -> dict[str, Any]:
+    def scan(self, image_path: str, crop) -> dict[str, Any]:
+        """Return GLM lines and caption-label starts in crop-relative coordinates."""
         if not self.available:
-            return {"available": False, "verified": None, "reason": "not_configured"}
-        from PIL import Image
+            return {
+                "available": False,
+                "reason": "not_configured",
+                "lines": [],
+                "anchors": [],
+            }
         from io import BytesIO
+        from PIL import Image
 
         with Image.open(image_path) as image:
             buffer = BytesIO()
             image.crop(tuple(map(int, crop))).save(buffer, format="PNG")
         prompt = (
-            "Act only as a caption-structure verifier. Determine whether this crop contains two or more "
-            "independent scientific captions. References such as 'shown in Table 2' are not new captions. "
-            'Return JSON only: {"multiple_captions":boolean,"anchors":[{"kind":"figure|table",'
-            '"number":string}],"confidence":0..1,"reason":string}. OCR lines: '
-            + json.dumps([line.text for line in lines], ensure_ascii=False)
+            "OCR this detected scientific-caption crop. Return JSON only. Preserve reading order and "
+            "line breaks. Locate every line in normalized crop coordinates 0..1000. A caption label is "
+            "a Fig, Figure, Table, or Tab label followed by an identifier at the START of a logical "
+            "caption; do not mark an in-sentence reference. Schema: "
+            '{"lines":[{"text":"...","bbox":[x0,y0,x1,y1]}],'
+            '"anchors":[{"line_index":0,"kind":"figure|table","label":"Fig. 1"}],'
+            '"confidence":0.0}. Every anchor line starts a caption and that caption ends immediately '
+            "before the next anchor line."
         )
         payload = {
             "model": self.config.glm_model,
@@ -190,17 +199,53 @@ class GlmOcrVerifier:
             content = raw["choices"][0]["message"]["content"].strip()
             content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
             result = json.loads(content)
-            return {
-                "available": True,
-                "verified": bool(result.get("multiple_captions")),
-                **result,
-            }
+            return {"available": True, **result}
         except Exception as exc:
             return {
                 "available": True,
-                "verified": None,
-                "reason": f"verifier_error:{type(exc).__name__}",
+                "reason": f"scan_error:{type(exc).__name__}",
+                "lines": [],
+                "anchors": [],
             }
+
+    # Compatibility for injected verifiers used by older callers/tests.
+    def verify(self, image_path: str, crop, lines, anchors) -> dict[str, Any]:
+        result = self.scan(image_path, crop)
+        return {**result, "verified": len(result.get("anchors", [])) >= 2}
+
+
+def _glm_lines(result, crop) -> list[TextLine]:
+    """Map GLM's normalized crop line boxes back to page-image pixels."""
+    width, height = crop[2] - crop[0], crop[3] - crop[1]
+    output = []
+    for item in result.get("lines", []):
+        box = item.get("bbox")
+        if (
+            not isinstance(box, list)
+            or len(box) != 4
+            or not str(item.get("text", "")).strip()
+        ):
+            continue
+        x0, y0, x1, y1 = (float(value) for value in box)
+        if (
+            not all(0 <= value <= 1000 for value in (x0, y0, x1, y1))
+            or x1 <= x0
+            or y1 <= y0
+        ):
+            continue
+        output.append(
+            TextLine(
+                str(item["text"]).strip(),
+                (
+                    crop[0] + width * x0 / 1000,
+                    crop[1] + height * y0 / 1000,
+                    crop[0] + width * x1 / 1000,
+                    crop[1] + height * y1 / 1000,
+                ),
+                confidence=result.get("confidence"),
+            )
+        )
+    return output
 
 
 def _parent_score(block, anchor, asset, page_height, config):
@@ -249,8 +294,22 @@ def decompose_captions(regions, pages, document, config=None, verifier=None):
             extraction_error = type(exc).__name__
         else:
             extraction_error = None
+        # GLM scans every detected caption.  Native words remain a fallback and
+        # a geometry cross-check, rather than a gate that can prevent scanning.
+        if config.glm_verify:
+            if hasattr(verifier, "scan"):
+                glm = verifier.scan(region["page_image_path"], region["bbox_px"])
+            else:
+                glm = verifier.verify(
+                    region["page_image_path"], region["bbox_px"], lines, []
+                )
+        else:
+            glm = {"available": False, "reason": "disabled", "lines": [], "anchors": []}
+        glm_lines = _glm_lines(glm, region["bbox_px"])
+        geometry_source = "glm_ocr" if glm_lines else "native_pdf"
+        analysis_lines = glm_lines or lines
         suspicious, reasons = _suspicious(
-            region, lines, float(page["image_height_px"]), assets, config
+            region, analysis_lines, float(page["image_height_px"]), assets, config
         )
         record = {
             "source_region_id": str(region["layout_region_id"]),
@@ -258,43 +317,46 @@ def decompose_captions(regions, pages, document, config=None, verifier=None):
             "suspicion_reasons": reasons,
             "native_line_count": len(lines),
             "native_extraction_error": extraction_error,
+            "glm_scan": glm,
+            "geometry_source": geometry_source,
             "status": "preserved",
         }
-        if not suspicious:
+        if not analysis_lines:
             output.append(region)
+            record["status"] = "abstained_no_positioned_lines"
             diagnostics.append(record)
             continue
-        candidates = [
-            (i, _anchor(line, region["bbox_px"][0])) for i, line in enumerate(lines)
-        ]
-        candidates = [
-            (i, a) for i, a in candidates if a and a["score"] >= config.min_anchor_score
-        ]
+        candidates = []
+        for index, line in enumerate(analysis_lines):
+            anchor = _anchor(line, region["bbox_px"][0])
+            if anchor and anchor["score"] >= config.min_anchor_score:
+                candidates.append((index, anchor))
+        # Prefer GLM's explicit semantic anchors, while requiring a valid line
+        # index and a figure/table label at that line's beginning.
+        if glm_lines and glm.get("anchors"):
+            explicit = []
+            for item in glm["anchors"]:
+                try:
+                    index = int(item["line_index"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not 0 <= index < len(analysis_lines):
+                    continue
+                anchor = _anchor(analysis_lines[index], region["bbox_px"][0])
+                if anchor:
+                    explicit.append((index, anchor))
+            if explicit:
+                candidates = sorted(dict(explicit).items())
         if len(candidates) < 2:
             output.append(region)
             record["status"] = "abstained_insufficient_anchors"
             diagnostics.append(record)
             continue
-        glm = (
-            verifier.verify(
-                region["page_image_path"],
-                region["bbox_px"],
-                lines,
-                [a for _, a in candidates],
-            )
-            if config.glm_verify
-            else {"verified": None, "reason": "disabled"}
-        )
-        record["glm_verification"] = glm
-        # A configured verifier may veto or abstain; unavailable verification does not erase strong native evidence.
-        if glm.get("available") and glm.get("verified") is not True:
-            output.append(region)
-            record["status"] = "abstained_glm_not_confirmed"
-            diagnostics.append(record)
-            continue
-        heights = [max(1.0, line.bbox[3] - line.bbox[1]) for line in lines]
+        record["detected_anchors"] = [anchor for _, anchor in candidates]
+        heights = [max(1.0, line.bbox[3] - line.bbox[1]) for line in analysis_lines]
         if any(
-            (lines[b].bbox[1] - lines[a].bbox[3]) / (sum(heights) / len(heights))
+            (analysis_lines[b].bbox[1] - analysis_lines[a].bbox[3])
+            / (sum(heights) / len(heights))
             < -config.min_anchor_separation_lines
             for (a, _), (b, _) in zip(candidates, candidates[1:])
         ):
@@ -302,19 +364,19 @@ def decompose_captions(regions, pages, document, config=None, verifier=None):
             record["status"] = "abstained_overlapping_anchors"
             diagnostics.append(record)
             continue
-        starts = [i for i, _ in candidates] + [len(lines)]
+        starts = [i for i, _ in candidates] + [len(analysis_lines)]
         children = []
         semantic_children = []
         used_parents = set()
         for ordinal, ((start, anchor), end) in enumerate(
             zip(candidates, starts[1:]), 1
         ):
-            block_lines = lines[start:end]
+            block_lines = analysis_lines[start:end]
             # A detector box can contain caption + body paragraph + caption.
             # Isolate a prose-like tail only when a conspicuous whitespace break
             # precedes it; ordinary multiline caption continuations remain intact.
             prose_lines = []
-            if end < len(lines) and len(block_lines) >= 3:
+            if end < len(analysis_lines) and len(block_lines) >= 3:
                 gaps = [
                     max(0.0, b.bbox[1] - a.bbox[3])
                     for a, b in zip(block_lines, block_lines[1:])
@@ -361,7 +423,7 @@ def decompose_captions(regions, pages, document, config=None, verifier=None):
                 0.55
                 + 0.08 * anchor["score"]
                 + (0.12 if parent_id else 0)
-                + (0.1 if glm.get("verified") else 0),
+                + (0.1 if glm_lines else 0),
             )
             child = deepcopy(region)
             child.update(

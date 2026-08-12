@@ -160,7 +160,7 @@ class CaptionDecompositionConfig:
     enabled: bool = True
     native_text_first: bool = True
     glm_verify: bool = True
-    glm_endpoint: str = ""
+    glm_endpoint: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     glm_api_key: str = ""
     glm_model: str = "glm-ocr"
     glm_timeout_seconds: float = 45.0
@@ -276,7 +276,10 @@ class PipelineConfig:
                 enabled=_flag("PHASE1_CAPTION_DECOMPOSITION", True),
                 native_text_first=_flag("PHASE1_CAPTION_NATIVE_TEXT_FIRST", True),
                 glm_verify=_flag("PHASE1_GLM_OCR_VERIFY", True),
-                glm_endpoint=os.environ.get("PHASE1_GLM_OCR_ENDPOINT", ""),
+                glm_endpoint=os.environ.get(
+                    "PHASE1_GLM_OCR_ENDPOINT",
+                    "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                ),
                 glm_api_key=os.environ.get("PHASE1_GLM_OCR_API_KEY", ""),
                 glm_model=os.environ.get("PHASE1_GLM_OCR_MODEL", "glm-ocr"),
             ),

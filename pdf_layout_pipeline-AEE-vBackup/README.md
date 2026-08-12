@@ -55,22 +55,20 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 
 ## Merged-caption decomposition
 
-After overlap normalization and before final caption association, suspicious
-detector `Caption` boxes are inspected using clipped native PDF words. Multiple
-caption starts must occur at localized line starts and pass lexical, geometric,
-and nearby-object checks. The split boxes are unions of actual text lines rather
-than equal subdivisions, and the original region ID and box remain in every
-derived child's provenance. Figure/table references embedded in a line do not
-create anchors; constrained OCR-confusion matching is permitted only with the
-same geometric safeguards.
+After overlap normalization and before final caption association, **every**
+detector `Caption` crop is sent to GLM-OCR when credentials are configured. GLM
+returns positioned OCR lines and identifies `Fig`/`Figure`/`Table`/`Tab` labels
+that begin logical captions. Each label starts a derived caption, and its content
+ends immediately before the next label. Split boxes are unions of those actual
+OCR lines rather than equal subdivisions. Figure/table references embedded in a
+sentence do not create anchors. Native PDF words provide a coordinate-bearing
+fallback when GLM is unavailable or returns no valid positioned lines.
 
 GLM-OCR is an optional verifier configured through `PHASE1_GLM_OCR_ENDPOINT`,
-`PHASE1_GLM_OCR_API_KEY`, and `PHASE1_GLM_OCR_MODEL`. It receives a crop and the
-localized native lines and returns semantic JSON. A configured verifier must
-affirm a split; failures and uncertainty cause conservative abstention. Because
-GLM output is not treated as geometric authority, an unavailable text layer
-never causes an arbitrary split. All attempts and abstention reasons are exposed
-under the `caption_decomposition` diagnostics entry.
+`PHASE1_GLM_OCR_API_KEY`, and `PHASE1_GLM_OCR_MODEL`. The endpoint defaults to
+the BigModel OpenAI-compatible chat-completions URL and can be overridden. All
+scan results, positioned-line sources, anchors, derived IDs, and abstention
+reasons are exposed under the `caption_decomposition` diagnostics entry.
 
 ## Generalized overlap resolution
 

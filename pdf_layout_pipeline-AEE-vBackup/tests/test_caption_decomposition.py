@@ -95,7 +95,7 @@ def test_in_sentence_reference_is_not_an_anchor(monkeypatch):
     assert diagnostics[0]["status"] != "decomposed"
 
 
-def test_fuzzy_anchor_requires_context_and_glm_can_veto(monkeypatch):
+def test_fuzzy_anchor_requires_context_and_legacy_glm_response_falls_back(monkeypatch):
     lines = [
         line("F1g. 1. Plot", 310),
         line("details", 332),
@@ -117,8 +117,47 @@ def test_fuzzy_anchor_requires_context_and_glm_can_veto(monkeypatch):
         verify=lambda *args: {"available": True, "verified": False, "confidence": 0.8}
     )
     output, diagnostics = run(monkeypatch, exact, verifier=verifier)
-    assert output[0]["layout_region_id"] == "cap"
-    assert diagnostics[0]["status"] == "abstained_glm_not_confirmed"
+    assert [item["type"] for item in output] == ["Figure Caption", "Table Caption"]
+    assert diagnostics[0]["geometry_source"] == "native_pdf"
+
+
+def test_glm_scans_every_caption_and_uses_label_to_next_label(monkeypatch):
+    monkeypatch.setattr(module, "_native_lines", lambda *args: [])
+    caption = region("cap", "Caption", (100, 300, 700, 500), "merged")
+    calls = []
+
+    class Verifier:
+        def scan(self, image_path, crop):
+            calls.append((image_path, crop))
+            return {
+                "available": True,
+                "confidence": 0.96,
+                "lines": [
+                    {"text": "Fig. 1. Rainfall", "bbox": [0, 20, 1000, 150]},
+                    {"text": "figure continuation", "bbox": [0, 170, 1000, 300]},
+                    {"text": "Table 2. Treatments", "bbox": [0, 550, 1000, 680]},
+                    {"text": "table continuation", "bbox": [0, 700, 1000, 850]},
+                ],
+                "anchors": [
+                    {"line_index": 0, "kind": "figure", "label": "Fig. 1"},
+                    {"line_index": 2, "kind": "table", "label": "Table 2"},
+                ],
+            }
+
+    output, diagnostics = decompose_captions(
+        [caption],
+        [PAGE],
+        SimpleNamespace(pdf_path="x"),
+        CaptionDecompositionConfig(glm_verify=True),
+        Verifier(),
+    )
+    assert len(calls) == 1
+    assert [item["type"] for item in output] == ["Figure Caption", "Table Caption"]
+    assert output[0]["text"] == "Fig. 1. Rainfall figure continuation"
+    assert output[1]["text"] == "Table 2. Treatments table continuation"
+    assert output[0]["bbox_px"][3] == 360
+    assert output[1]["bbox_px"][1] == 410
+    assert diagnostics[0]["geometry_source"] == "glm_ocr"
 
 
 def test_intervening_paragraph_becomes_its_own_text_region(monkeypatch):
