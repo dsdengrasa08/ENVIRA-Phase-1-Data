@@ -83,6 +83,16 @@ as separate JSONL artifacts. The workflow provides a resolution overlay showing
 source geometry, resolved geometry, suppressed detections, hierarchy arrows, and
 unresolved conflicts.
 
+Nested asset handling is non-destructive. Figure/table containment is proposed in
+the core, then validated once after duplicate resolution. Only semantically
+compatible children with one unambiguous container receive nested emission;
+expanded figures that newly capture text, nested containers, and competing parents
+remain top-level conflicts. Reading order is assigned after hierarchy acceptance as
+separate contiguous top-level and parent-local sequences. Explicit exports are
+`physical_layout_regions.jsonl`, `top_level_layout_regions.jsonl`, and
+`nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
+core-filtered physical input.
+
 ## Logical table context
 
 After the core filters and reading-order assignment, the package creates

@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from copy import deepcopy
-
 from .caption_overlap import build_caption_groups
 from .independent_core import run_independent_core
 from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
+from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
 from .table_context import associate_table_context
 
 
 def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
     result = run_independent_core(conversion, page_set, config)
+    result.filtered_regions = result.final_regions
     result.diagnostics["effective_config"] = config.to_dict()
     try:
         docling_version = version("docling")
@@ -31,17 +31,6 @@ def run_layout_pipeline(conversion, page_set, config):
         "nms_configuration": "not_exposed_by_pipeline",
     }
     resolution_input = list(result.final_regions)
-    if config.overlap_resolution.preserve_authoritative_nested_regions:
-        existing_ids = {str(region["layout_region_id"]) for region in resolution_input}
-        for excluded in result.excluded_by_stage.get("nested_assets", []):
-            region_id = str(excluded.get("layout_region_id"))
-            if not region_id or region_id in existing_ids:
-                continue
-            recovered = deepcopy(excluded)
-            recovered["authoritative_filter_disposition"] = "recovered_for_hierarchy"
-            recovered["emission_policy"] = "emit_as_nested_child"
-            resolution_input.append(recovered)
-            existing_ids.add(region_id)
     resolution = resolve_layout_overlaps(
         resolution_input, result.pages, config.overlap_resolution
     )
@@ -52,6 +41,21 @@ def run_layout_pipeline(conversion, page_set, config):
     result.caption_overlap_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
+    proposals = analyze_nested_containment(result.resolved_regions)
+    hierarchy = resolve_nested_hierarchy(result.resolved_regions, proposals)
+    result.resolved_regions = hierarchy.regions
+    result.physical_regions = hierarchy.regions
+    result.top_level_regions = hierarchy.top_level_regions
+    result.nested_regions = hierarchy.nested_regions
+    # General overlap still observes containment, but only the hierarchy resolver
+    # is authoritative for parent/child emission.
+    result.layout_relationships = [
+        relation
+        for relation in result.layout_relationships
+        if relation.get("kind") != "LEGITIMATE_CONTAINMENT"
+    ]
+    result.layout_relationships.extend(hierarchy.relationships)
+    result.resolution_decisions.extend(hierarchy.decisions)
     semantic_associations = associate_attachable_context(
         result.resolved_regions, result.pages
     )
@@ -67,12 +71,29 @@ def run_layout_pipeline(conversion, page_set, config):
         "relationship_count": len(result.layout_relationships),
         "decision_count": len(result.resolution_decisions),
         "suppressed_region_count": len(result.suppressed_regions),
-        "recovered_nested_region_count": sum(
-            region.get("authoritative_filter_disposition") == "recovered_for_hierarchy"
-            for region in result.resolved_regions
-        ),
+        "recovered_nested_region_count": 0,
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
+    }
+    previous_ids = {
+        str(decision.get("region_id"))
+        for decision in result.diagnostics.get("nested_assets", {}).get("decisions", [])
+        if decision.get("region_id")
+    }
+    proposal_ids = {str(proposal["child_region_id"]) for proposal in proposals}
+    result.diagnostics["nested_hierarchy"] = {
+        **hierarchy.diagnostics,
+        "relationships": hierarchy.relationships,
+        "decisions": hierarchy.decisions,
+        "top_level_count": len(result.top_level_regions),
+        "nested_count": len(result.nested_regions),
+        "legacy_comparison": {
+            "previous_candidate_ids": sorted(previous_ids),
+            "current_candidate_ids": sorted(proposal_ids),
+            "matched_ids": sorted(previous_ids & proposal_ids),
+            "missing_from_current_ids": sorted(previous_ids - proposal_ids),
+            "new_candidate_ids": sorted(proposal_ids - previous_ids),
+        },
     }
     if config.table_context.enabled:
         result.logical_tables = associate_table_context(
@@ -102,4 +123,5 @@ def run_layout_pipeline(conversion, page_set, config):
             result.pages,
             config.caption_overlap,
         )
+        result.semantic_groups = result.caption_groups
     return result

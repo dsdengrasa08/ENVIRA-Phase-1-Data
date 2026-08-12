@@ -31,6 +31,9 @@ def export_pipeline_result(run):
     _write_jsonl(paths.regions_jsonl, run.final_regions)
     _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
     _write_jsonl(paths.resolved_regions_jsonl, run.resolved_regions)
+    _write_jsonl(paths.physical_regions_jsonl, run.physical_regions)
+    _write_jsonl(paths.top_level_regions_jsonl, run.top_level_regions)
+    _write_jsonl(paths.nested_regions_jsonl, run.nested_regions)
     _write_jsonl(paths.caption_relationships_jsonl, run.caption_overlap_relationships)
     _write_jsonl(paths.caption_groups_jsonl, run.caption_groups)
     _write_jsonl(paths.layout_relationships_jsonl, run.layout_relationships)
@@ -53,6 +56,9 @@ def export_pipeline_result(run):
             paths.logical_tables_jsonl,
             paths.raw_regions_jsonl,
             paths.resolved_regions_jsonl,
+            paths.physical_regions_jsonl,
+            paths.top_level_regions_jsonl,
+            paths.nested_regions_jsonl,
             paths.caption_relationships_jsonl,
             paths.caption_groups_jsonl,
             paths.layout_relationships_jsonl,

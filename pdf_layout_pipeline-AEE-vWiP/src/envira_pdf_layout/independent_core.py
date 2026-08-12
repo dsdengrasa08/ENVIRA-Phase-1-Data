@@ -14120,7 +14120,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             List[Dict[str, Any]],
             Dict[str, Any],
         ]:
-            """Keep Figure/Table parents and remove child detections inside them."""
+            """Annotate former exclusions as proposals without deleting detections."""
             analysis = analyze_nested_asset_elements(regions, page_map)
             drop_ids = {
                 str(region_id)
@@ -14132,21 +14132,18 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             }
 
             kept = []
-            dropped = []
+            would_have_dropped = []
             for region in regions:
                 region_id = _nested_asset_region_id(region)
-                if region_id not in drop_ids:
-                    kept.append(region)
-                    continue
-
                 decision = decision_by_id.get(region_id, {})
-                row = dict(region)
+                row = region
+                if region_id not in drop_ids:
+                    kept.append(row)
+                    continue
                 parent_kind = str(
                     decision.get("parent_asset_kind", "asset")
                 )
-                row["filter_reason"] = (
-                    f"nested_inside_{parent_kind}"
-                )
+                row["nested_asset_previous_filter_reason"] = f"nested_inside_{parent_kind}"
                 row["nested_asset_parent_region_id"] = (
                     decision.get("parent_asset_region_id")
                 )
@@ -14156,9 +14153,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 row["nested_asset_overlap_metrics"] = (
                     decision.get("metrics")
                 )
-                dropped.append(row)
+                row["nested_asset_disposition"] = "hierarchy_candidate"
+                kept.append(row)
+                would_have_dropped.append(dict(row))
 
-            return kept, dropped, analysis
+            analysis["would_have_excluded"] = would_have_dropped
+            analysis["authoritative_mode"] = "non_destructive_proposals"
+            return kept, [], analysis
 
 
         def debug_nested_asset_elements(

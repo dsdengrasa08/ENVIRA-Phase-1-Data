@@ -34,6 +34,9 @@ class ArtifactPaths:
     suppressed_regions_jsonl: Path
     effective_config_json: Path
     diagnostics_json: Path
+    physical_regions_jsonl: Path
+    top_level_regions_jsonl: Path
+    nested_regions_jsonl: Path
     summary_csv: Path
 
 
@@ -107,6 +110,11 @@ class PipelineResult:
     layout_relationships: list[dict[str, Any]] = field(default_factory=list)
     resolution_decisions: list[dict[str, Any]] = field(default_factory=list)
     suppressed_regions: list[LayoutRegion] = field(default_factory=list)
+    physical_regions: list[LayoutRegion] = field(default_factory=list)
+    top_level_regions: list[LayoutRegion] = field(default_factory=list)
+    nested_regions: list[LayoutRegion] = field(default_factory=list)
+    filtered_regions: list[LayoutRegion] = field(default_factory=list)
+    semantic_groups: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

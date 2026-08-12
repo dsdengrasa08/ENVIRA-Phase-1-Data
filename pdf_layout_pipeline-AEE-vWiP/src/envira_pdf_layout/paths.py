@@ -72,6 +72,9 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         suppressed_regions_jsonl=document_dir / "suppressed_layout_regions.jsonl",
         effective_config_json=document_dir / "effective_config.json",
         diagnostics_json=document_dir / "pipeline_diagnostics.json",
+        physical_regions_jsonl=document_dir / "physical_layout_regions.jsonl",
+        top_level_regions_jsonl=document_dir / "top_level_layout_regions.jsonl",
+        nested_regions_jsonl=document_dir / "nested_layout_regions.jsonl",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (
