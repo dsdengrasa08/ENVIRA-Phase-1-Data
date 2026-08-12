@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import pandas as pd
+from .stage_trace import tabular_trace
 
 
 def page_records_dataframe(page_set):
@@ -52,6 +53,11 @@ def hierarchy_counts_dataframe(run):
             }
         ]
     )
+
+
+def stage_trace_dataframe(run):
+    """Show region deltas and validation state across major pipeline stages."""
+    return pd.DataFrame(tabular_trace(run.stage_trace))
 
 
 def figure_completion_proposals_dataframe(run):

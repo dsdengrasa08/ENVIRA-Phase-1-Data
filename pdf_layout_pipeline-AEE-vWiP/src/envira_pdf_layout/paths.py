@@ -76,6 +76,7 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         top_level_regions_jsonl=document_dir / "top_level_layout_regions.jsonl",
         nested_regions_jsonl=document_dir / "nested_layout_regions.jsonl",
         figure_completion_proposals_jsonl=document_dir / "figure_completion_proposals.jsonl",
+        stage_trace_jsonl=document_dir / "stage_trace.jsonl",
         summary_csv=document_dir / "summary.csv",
     )
     for directory in (

@@ -38,6 +38,7 @@ class ArtifactPaths:
     top_level_regions_jsonl: Path
     nested_regions_jsonl: Path
     figure_completion_proposals_jsonl: Path
+    stage_trace_jsonl: Path
     summary_csv: Path
 
 
@@ -116,6 +117,7 @@ class PipelineResult:
     nested_regions: list[LayoutRegion] = field(default_factory=list)
     filtered_regions: list[LayoutRegion] = field(default_factory=list)
     semantic_groups: list[dict[str, Any]] = field(default_factory=list)
+    stage_trace: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

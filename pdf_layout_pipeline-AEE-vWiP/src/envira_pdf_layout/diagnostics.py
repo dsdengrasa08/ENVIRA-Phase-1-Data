@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import pandas as pd
+from .stage_trace import tabular_trace
 
 
 def stage_exclusions(run, stage):
@@ -82,3 +83,8 @@ def nested_hierarchy_diagnostics(run, page_number=None):
     if page_number is not None:
         rows = [row for row in rows if row.get("page_number") == page_number]
     return pd.DataFrame(rows)
+
+
+def stage_trace_diagnostics(run):
+    """Return compact before/after counts and invariants for every major stage."""
+    return pd.DataFrame(tabular_trace(run.stage_trace))

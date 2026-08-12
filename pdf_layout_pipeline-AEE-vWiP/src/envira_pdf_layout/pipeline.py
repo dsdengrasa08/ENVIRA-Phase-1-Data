@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+from time import perf_counter
 
 from .caption_overlap import build_caption_groups
 from .caption_association import associate_captions
 from .independent_core import run_independent_core
 from .layout_overlap import resolve_layout_overlaps
 from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
+from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
 
 
 def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
+    started = perf_counter()
     result = run_independent_core(conversion, page_set, config)
+    core_snapshot = snapshot(
+        "independent_core",
+        result.final_regions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace = [core_snapshot]
     result.filtered_regions = result.final_regions
     result.diagnostics["effective_config"] = config.to_dict()
     try:
@@ -32,6 +41,7 @@ def run_layout_pipeline(conversion, page_set, config):
         "nms_configuration": "not_exposed_by_pipeline",
     }
     resolution_input = list(result.final_regions)
+    started = perf_counter()
     resolution = resolve_layout_overlaps(
         resolution_input,
         result.pages,
@@ -42,6 +52,16 @@ def run_layout_pipeline(conversion, page_set, config):
     result.layout_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
+    overlap_snapshot = snapshot(
+        "overlap_resolution",
+        result.resolved_regions,
+        previous=core_snapshot,
+        relationships=result.layout_relationships,
+        decisions=result.resolution_decisions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace.append(overlap_snapshot)
+    started = perf_counter()
     proposals = analyze_nested_containment(
         result.resolved_regions,
         result.layout_relationships,
@@ -54,6 +74,20 @@ def run_layout_pipeline(conversion, page_set, config):
     result.physical_regions = hierarchy.regions
     result.top_level_regions = hierarchy.top_level_regions
     result.nested_regions = hierarchy.nested_regions
+    hierarchy_snapshot = snapshot(
+        "nested_hierarchy",
+        result.resolved_regions,
+        previous=overlap_snapshot,
+        relationships=hierarchy.relationships,
+        decisions=hierarchy.decisions,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    hierarchy_snapshot["top_level_count"] = len(result.top_level_regions)
+    hierarchy_snapshot["nested_count"] = len(result.nested_regions)
+    hierarchy_snapshot["invariants"]["partition_valid"] = len(
+        result.physical_regions
+    ) == len(result.top_level_regions) + len(result.nested_regions)
+    result.stage_trace.append(hierarchy_snapshot)
     # Replace observational candidates with exactly one authoritative outcome.
     result.layout_relationships = [
         relation
@@ -65,10 +99,19 @@ def run_layout_pipeline(conversion, page_set, config):
     # Backward-compatible caption inspection now receives authoritative rather
     # than provisional containment outcomes.
     result.caption_overlap_relationships = list(result.layout_relationships)
+    started = perf_counter()
     semantic_associations = associate_captions(
         result.resolved_regions, result.pages, config=config.caption_association
     )
     result.layout_relationships.extend(semantic_associations)
+    caption_snapshot = snapshot(
+        "caption_association",
+        result.resolved_regions,
+        previous=hierarchy_snapshot,
+        relationships=semantic_associations,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    result.stage_trace.append(caption_snapshot)
     result.diagnostics["caption_association"] = {
         "candidate_count": len(semantic_associations),
         "associated_count": sum(
@@ -119,6 +162,7 @@ def run_layout_pipeline(conversion, page_set, config):
             "new_candidate_ids": sorted(proposal_ids - previous_ids),
         },
     }
+    started = perf_counter()
     if config.table_context.enabled:
         result.logical_tables = associate_table_context(
             result.resolved_regions,
@@ -148,4 +192,18 @@ def run_layout_pipeline(conversion, page_set, config):
             config.caption_overlap,
         )
         result.semantic_groups = result.caption_groups
+    final_snapshot = snapshot(
+        "semantic_grouping",
+        result.resolved_regions,
+        previous=caption_snapshot,
+        relationships=result.layout_relationships,
+        elapsed_ms=(perf_counter() - started) * 1000,
+    )
+    final_snapshot["logical_table_count"] = len(result.logical_tables)
+    final_snapshot["caption_group_count"] = len(result.caption_groups)
+    result.stage_trace.append(final_snapshot)
+    result.diagnostics["stage_trace"] = {
+        "validation": validate_trace(result.stage_trace),
+        "stages": result.stage_trace,
+    }
     return result

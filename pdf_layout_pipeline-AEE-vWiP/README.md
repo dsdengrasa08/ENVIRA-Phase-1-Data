@@ -62,6 +62,8 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   resource cleanup, geometry validation, categorized contextual failures, and a
   dependency-only circuit breaker. Page-local OCR failures remain isolated and do
   not prevent fallback attempts on later pages.
+- `stage_trace.py`: compact stage-by-stage region counts, ID deltas, relationship
+  counts, and invariants for locating the first stage that introduced a regression.
 
 ## Generalized overlap resolution
 
@@ -136,6 +138,13 @@ generic lexical and optional typography evidence, structural stopping boundaries
 and exclusive candidate ownership. Results are available in
 `PipelineResult.logical_tables`, each page's `logical_tables` field, diagnostics,
 the optional table-context overlay, and `logical_tables.jsonl`.
+
+Every run also exports `stage_trace.jsonl`. The trace records compact counts by
+page and class, added/removed region IDs, relationship and decision counts, and
+geometry/type changes, stable content digests, elapsed time, and
+geometry/identity/hierarchy invariants after each major stage. The notebook
+displays this trace directly, making the earliest divergent stage visible without
+diffing full region payloads or rerunning OCR and model inference.
 
 Caption association is seed anchored: a detector `Caption` region or a generalized
 table-label prefix first establishes a caption-to-table candidate. Once that
