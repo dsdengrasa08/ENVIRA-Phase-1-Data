@@ -51,16 +51,18 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
         color = _COLORS.get(typ, _COLORS["Unknown"])
         cv2.rectangle(image, (x0, y0), (x1, y1), color, 3)
         if r.get("asset_association_role"):
-            prefix = f"A{r.get('asset_overlay_order','?')}"
+            prefix = f"A{r.get('asset_overlay_order', '?')}"
             label = f"{prefix} {typ}/{r['asset_association_role']} [post_body_asset]"
         else:
-            label = f"{r.get('visual_overlay_order','')} {typ}".strip()
+            label = f"{r.get('visual_overlay_order', '')} {typ}".strip()
         if r.get("synthetic_detection_method") == "caption_anchored_figure_completion":
             label += " [completed]"
+        if r.get("resolution_action") == "semantic_caption_split":
+            label += f" [split:{r.get('caption_object_type', '?')}]"
         _label(image, label, (x0 + 4, max(18, y0 + 18)), color)
     _label(
         image,
-        f"Docling layout | page {page['page_number']} | article={len(page['layout_regions'])} | assets={len(page.get('post_body_asset_regions',[]))}",
+        f"Docling layout | page {page['page_number']} | article={len(page['layout_regions'])} | assets={len(page.get('post_body_asset_regions', []))}",
         (24, 36),
         (0, 0, 255),
     )
@@ -298,7 +300,9 @@ def render_caption_overlap_overlay(run, page_number, output_path: Path | None = 
     return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
 
 
-def render_overlap_resolution_overlay(run, page_number, output_path: Path | None = None):
+def render_overlap_resolution_overlay(
+    run, page_number, output_path: Path | None = None
+):
     """Render original/resolved/suppressed geometry and unresolved graph edges."""
     import cv2
 
@@ -322,10 +326,18 @@ def render_overlap_resolution_overlay(run, page_number, output_path: Path | None
         x0, y0, x1, y1 = int_bbox(tuple(source))
         cv2.rectangle(image, (x0, y0), (x1, y1), (150, 150, 150), 1, cv2.LINE_AA)
     for region in resolved.values():
-        x0, y0, x1, y1 = int_bbox(tuple(region.get("resolved_bbox_px", region["bbox_px"])))
-        color = (0, 165, 255) if region.get("resolution_status") == "ambiguous" else (40, 180, 40)
+        x0, y0, x1, y1 = int_bbox(
+            tuple(region.get("resolved_bbox_px", region["bbox_px"]))
+        )
+        color = (
+            (0, 165, 255)
+            if region.get("resolution_status") == "ambiguous"
+            else (40, 180, 40)
+        )
         cv2.rectangle(image, (x0, y0), (x1, y1), color, 2, cv2.LINE_AA)
-        _label(image, str(region["layout_region_id"]), (x0 + 3, max(18, y0 + 16)), color)
+        _label(
+            image, str(region["layout_region_id"]), (x0 + 3, max(18, y0 + 16)), color
+        )
     for region in suppressed.values():
         x0, y0, x1, y1 = int_bbox(tuple(region["bbox_px"]))
         cv2.rectangle(image, (x0, y0), (x1, y1), (80, 80, 220), 1, cv2.LINE_4)

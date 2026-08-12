@@ -8,12 +8,18 @@ from .authoritative import run_authoritative_pipeline
 from copy import deepcopy
 
 from .caption_overlap import build_caption_groups
+from .caption_validation import validate_and_segment_captions
 from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
 from .table_context import associate_table_context
 
 
-def run_layout_pipeline(conversion, page_set, config):
-    """Run authoritative layout processing, then infer logical table groups."""
+def run_layout_pipeline(conversion, page_set, config, *, caption_line_provider=None):
+    """Run layout processing and infer semantic groups.
+
+    ``caption_line_provider`` is an optional selective OCR/GLM adapter. It is
+    called only when a caption has neither structured lines nor usable native PDF
+    text, and must return line text with page-pixel bounding boxes.
+    """
     result = run_authoritative_pipeline(conversion, page_set, config)
     try:
         docling_version = version("docling")
@@ -51,9 +57,30 @@ def run_layout_pipeline(conversion, page_set, config):
     result.caption_overlap_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
+    validated, caption_decisions, segment_associations = validate_and_segment_captions(
+        result.resolved_regions,
+        result.pages,
+        config.caption_validation,
+        pdf_path=result.document.pdf_path,
+        line_provider=caption_line_provider,
+    )
+    result.resolved_regions = validated
+    result.resolution_decisions.extend(caption_decisions)
+    result.diagnostics["caption_validation"] = {
+        "candidate_count": len(caption_decisions),
+        "split_count": sum(item["action"] == "split" for item in caption_decisions),
+        "decisions": caption_decisions,
+    }
     semantic_associations = associate_attachable_context(
         result.resolved_regions, result.pages
     )
+    segmented_ids = {item["child_region_id"] for item in segment_associations}
+    semantic_associations = [
+        item
+        for item in semantic_associations
+        if item.get("child_region_id") not in segmented_ids
+    ]
+    semantic_associations = segment_associations + semantic_associations
     result.layout_relationships.extend(semantic_associations)
     result.diagnostics["caption_overlap"] = {
         "relationship_count": len(result.caption_overlap_relationships),

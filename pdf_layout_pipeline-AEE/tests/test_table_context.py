@@ -270,3 +270,20 @@ def test_overlap_relationship_evidence_is_retained_on_fragment_edge():
 
     assert edge["features"]["relationship_kinds"] == ["FRAGMENT_CANDIDATE"]
     assert edge["features"]["components"]["overlap_evidence"] == 0.5
+
+
+def test_table_corridor_does_not_absorb_a_semantic_figure_caption():
+    regions = [
+        region("label", "Caption", [100, 100, 700, 125], "Table 4.", 1),
+        {
+            **region(
+                "figure-caption", "Caption", [100, 128, 700, 153], "Figure 5. Result", 2
+            ),
+            "caption_object_type": "Figure",
+        },
+        region("table", "Table", [100, 158, 700, 500], order=3),
+    ]
+
+    group = associate(regions)[0]
+
+    assert "figure-caption" not in group["caption_region_ids"]

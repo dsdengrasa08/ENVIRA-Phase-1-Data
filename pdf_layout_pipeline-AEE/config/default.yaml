@@ -53,3 +53,12 @@ overlap_resolution:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
   preserve_authoritative_nested_regions: true
+caption_validation:
+  enabled: true
+  # A line-start anchor only proposes a boundary; parent geometry confirms it.
+  split_acceptance_score: 6.0
+  split_margin: 1.5
+  review_score: 4.0
+  max_parent_gap_page_ratio: 0.12
+  min_parent_horizontal_overlap: 0.18
+  use_pdf_text_lines: true
