@@ -13,12 +13,25 @@ import os
 from pathlib import Path
 from typing import Any, Iterator
 
+from .content_policy import apply_content_policy
+from .figure_completion import validate_figure_completions
+from .heuristics import (
+    classify_document_family,
+    page1_publisher_decision,
+    publisher_matches,
+    publisher_tokens,
+)
+from .region_conversion import convert_docling_document
 from .types import PipelineResult
 
 
 @contextmanager
 def _temporary_environment(values: dict[str, str]) -> Iterator[None]:
-    previous = {name: os.environ.get(name) for name in values}
+    """Run the legacy core against the captured config, never ambient PHASE1 state."""
+    managed = {name for name in os.environ if name.startswith("PHASE1_")} | set(values)
+    previous = {name: os.environ.get(name) for name in managed}
+    for name in managed:
+        os.environ.pop(name, None)
     os.environ.update(values)
     try:
         yield
@@ -35,6 +48,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
     document = page_set.document
     artifacts = document.artifacts
     environment = {
+        **config.legacy_core_environment,
         "PHASE1_SOURCE_PDF": str(document.pdf_path),
         "PHASE1_USE_GOOGLE_DRIVE": "0",
         "PHASE1_PROJECT_DIR": str(config.runtime.project_dir),
@@ -43,6 +57,33 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         "PHASE1_RENDER_DPI": str(config.document.render_dpi),
         "PHASE1_RUN_ID": config.document.run_id,
         "PHASE1_DOCLING_EXCLUDE_LABELS": ",".join(sorted(config.exclude_labels)),
+        "PHASE1_DOCLING_DO_OCR": str(int(config.docling.do_ocr)),
+        "PHASE1_DOCLING_DO_TABLE_STRUCTURE": str(int(config.docling.do_table_structure)),
+        "PHASE1_DOCLING_DO_FORMULA_ENRICHMENT": str(int(config.docling.do_formula_enrichment)),
+        "PHASE1_DOCLING_DO_CODE_ENRICHMENT": str(int(config.docling.do_code_enrichment)),
+        "PHASE1_DOCLING_CODE_FORMULA_PRESET": config.docling.code_formula_preset,
+        "PHASE1_PAGE1_UPPER_FRONTMATTER_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_LOWER_METADATA_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_POST_ABSTRACT_AUTHOR_METADATA_FILTER": str(int(config.page1.enabled)),
+        "PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES": ",".join(config.page1.abstract_aliases),
+        "PHASE1_PAGE1_TITLE_Y_MIN": str(config.page1.title_y_min),
+        "PHASE1_PAGE1_TITLE_Y_MAX": str(config.page1.title_y_max),
+        "PHASE1_BODY_ANCHOR_Y_MAX": str(config.page1.body_anchor_y_max),
+        "PHASE1_PAGE1_LOWER_METADATA_MIN_Y": str(config.page1.lower_metadata_min_y),
+        "PHASE1_PAGE1_HARD_FOOTER_Y": str(config.page1.hard_footer_y),
+        "PHASE1_LATER_PAGE_UPPER_HEADER_FILTER": str(int(config.headers.enabled)),
+        "PHASE1_LATER_PAGE_HEADER_CANDIDATE_Y_MAX": str(config.headers.top_band_ratio),
+        "PHASE1_LATER_PAGE_HEADER_MIN_REPEAT_PAGES": str(config.headers.min_repeat_pages),
+        "PHASE1_SMALL_EDGE_FIGURE_FILTER": str(int(config.figures.filter_small_edge_figures)),
+        "PHASE1_CAPTION_FIGURE_COMPLETION": str(int(config.figures.complete_caption_anchored)),
+        "PHASE1_SMALL_EDGE_FIGURE_HEADER_Y1_MAX": str(config.figures.header_y1_max),
+        "PHASE1_SMALL_EDGE_FIGURE_FOOTER_Y0_MIN": str(config.figures.footer_y0_min),
+        "PHASE1_REPEATED_FOOTER_VISUAL_FILTER": str(int(config.footer.enabled)),
+        "PHASE1_COMPACT_FOOTER_FURNITURE_FILTER": str(int(config.footer.compact_enabled)),
+        "PHASE1_REPEATED_FOOTER_VISUAL_MIN_REPEAT_PAGES": str(config.footer.min_repeat_pages),
+        "PHASE1_COMPACT_FOOTER_Y0_MIN": str(config.footer.y0_min),
+        "PHASE1_CONCLUSION_TAIL_FILTER": str(int(config.tail.enabled)),
+        "PHASE1_DIRECT_BACKMATTER_FALLBACK": str(int(config.tail.direct_backmatter_fallback)),
     }
     display = lambda *args, **kwargs: None
     with _temporary_environment(environment):
@@ -1748,36 +1789,15 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         import math
         from collections import Counter, defaultdict
         from pathlib import Path
-        from typing import Any, Dict, Iterable, List, Optional, Tuple
+        from typing import Dict, List, Optional, Tuple
 
         import cv2
         import fitz
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd
-        from tqdm.auto import tqdm
-
-        try:
-            import docling
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-        except Exception as exc:
-            raise RuntimeError(
-                "Could not import Docling. Run the install cell and restart the runtime if needed. "
-                f"Original error: {repr(exc)}"
-            ) from exc
 
         BBox = Tuple[float, float, float, float]
-
-
-        def enum_to_str(value: Any) -> str:
-            """Return a clean string for plain strings, enums, and Docling labels."""
-            if value is None:
-                return "unknown"
-            if hasattr(value, "value"):
-                return str(value.value)
-            return str(value)
 
 
         def clip_bbox(b: BBox, width: int, height: int) -> BBox:
@@ -1820,91 +1840,6 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             plt.show()
 
 
-        def get_obj_value(obj: Any, name: str, default=None):
-            if isinstance(obj, dict):
-                return obj.get(name, default)
-            return getattr(obj, name, default)
-
-
-        def bbox_to_dict(bbox: Any) -> Dict[str, Any]:
-            if bbox is None:
-                return {}
-            if isinstance(bbox, dict):
-                return bbox
-            if hasattr(bbox, "model_dump"):
-                return bbox.model_dump(mode="json")
-            return {
-                "l": getattr(bbox, "l", None),
-                "t": getattr(bbox, "t", None),
-                "r": getattr(bbox, "r", None),
-                "b": getattr(bbox, "b", None),
-                "coord_origin": enum_to_str(getattr(bbox, "coord_origin", "TOPLEFT")),
-            }
-
-
-        def docling_label_to_region_type(label: str) -> str:
-            """Normalize Docling labels to readable region names while preserving extra Docling classes."""
-            label = str(label or "unknown").lower()
-            mapping = {
-                "title": "Title",
-                "section_header": "Section-header",
-                "text": "Text",
-                "paragraph": "Text",
-                "reference": "Reference",
-                "list_item": "List",
-                "table": "Table",
-                "document_index": "Table",
-                "picture": "Figure",
-                "chart": "Figure",
-                "caption": "Caption",
-                "footnote": "Footnote",
-                "formula": "Formula",
-                "code": "Code",
-                "page_header": "Page-header",
-                "page_footer": "Page-footer",
-                "form": "Form",
-                "key_value_region": "Key-value",
-                "field_region": "Field-region",
-                "field_heading": "Field-heading",
-                "field_item": "Field-item",
-                "field_key": "Field-key",
-                "field_value": "Field-value",
-                "handwritten_text": "Handwritten-text",
-            }
-            return mapping.get(label, label.replace("_", "-").title())
-
-
-        def docling_bbox_to_px(bbox: Any, page_record: Dict[str, Any]) -> Optional[BBox]:
-            """Convert Docling provenance bbox to the rendered PNG pixel coordinate system."""
-            b = bbox_to_dict(bbox)
-            needed = ["l", "t", "r", "b"]
-            if not all(k in b and b[k] is not None for k in needed):
-                return None
-
-            l, t, r, btm = (float(b["l"]), float(b["t"]), float(b["r"]), float(b["b"]))
-            origin = str(b.get("coord_origin", "TOPLEFT")).upper()
-
-            page_w_pt = float(page_record["page_width_pt"])
-            page_h_pt = float(page_record["page_height_pt"])
-            img_w = int(page_record["image_width_px"])
-            img_h = int(page_record["image_height_px"])
-
-            # Docling BoundingBox default is TOPLEFT. Some PDF geometry can be BOTTOMLEFT.
-            if origin == "BOTTOMLEFT":
-                x0_pt, x1_pt = min(l, r), max(l, r)
-                y_top_pt = page_h_pt - max(t, btm)
-                y_bottom_pt = page_h_pt - min(t, btm)
-            else:
-                x0_pt, x1_pt = min(l, r), max(l, r)
-                y_top_pt, y_bottom_pt = min(t, btm), max(t, btm)
-
-            sx = img_w / max(page_w_pt, 1e-9)
-            sy = img_h / max(page_h_pt, 1e-9)
-
-            px_bbox = (x0_pt * sx, y_top_pt * sy, x1_pt * sx, y_bottom_pt * sy)
-            return clip_bbox(px_bbox, img_w, img_h)
-
-
         # Package inputs replace the conversion/rendering globals used by the
         # original interactive workflow.  These assignments intentionally occur
         # at the same boundary as the former runtime adapter injection.
@@ -1936,104 +1871,32 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         POST_BODY_ASSET_REGIONS_JSONL = artifacts.post_body_asset_regions_jsonl
         SUMMARY_CSV = artifacts.summary_csv
 
-        # ---- Preserved source section: cell 22 ----
-        def iter_docling_items(doc: Any):
-            """Yield (item, level, doc_order) from Docling, with a dict fallback."""
-            if hasattr(doc, "iterate_items"):
-                for order, pair in enumerate(doc.iterate_items()):
-                    if isinstance(pair, tuple):
-                        item = pair[0]
-                        level = pair[1] if len(pair) > 1 else None
-                    else:
-                        item = pair
-                        level = None
-                    yield item, level, order
-                return
-
-            # Fallback for serialized Docling dicts.
-            possible_lists = ["texts", "tables", "pictures", "groups", "key_value_items", "form_items"]
-            order = 0
-            for key in possible_lists:
-                for item in docling_raw.get(key, []) or []:
-                    yield item, None, order
-                    order += 1
-
-
-        def resolve_page_number(docling_page_no: int, page_map: Dict[int, Dict[str, Any]]) -> Optional[int]:
-            """Handle both original page numbers and page-range-relative page numbers."""
-            if docling_page_no in page_map:
-                return docling_page_no
-            shifted = PAGE_START + docling_page_no - 1
-            if shifted in page_map:
-                return shifted
-            return None
-
-
-        def docling_item_to_regions(item: Any, level: Any, doc_order: int, page_map: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
-            raw_label = enum_to_str(get_obj_value(item, "label", "unknown")).lower()
-            region_type = docling_label_to_region_type(raw_label)
-            prov_list = get_obj_value(item, "prov", []) or []
-
-            text = get_obj_value(item, "text", None)
-            orig = get_obj_value(item, "orig", None)
-            self_ref = get_obj_value(item, "self_ref", None)
-            content_layer = enum_to_str(get_obj_value(item, "content_layer", None))
-
-            regions = []
-
-            for prov_idx, prov in enumerate(prov_list):
-                docling_page_no = int(get_obj_value(prov, "page_no", -1))
-                page_number = resolve_page_number(docling_page_no, page_map)
-                if page_number is None:
-                    continue
-
-                page_record = page_map[page_number]
-                bbox = get_obj_value(prov, "bbox", None)
-                bbox_px = docling_bbox_to_px(bbox, page_record)
-                if bbox_px is None or bbox_area(bbox_px) <= 0:
-                    continue
-
-                x0, y0, x1, y1 = bbox_px
-                region_idx = len(regions)
-
-                regions.append({
-                    "doc_id": DOC_ID,
-                    "pdf_hash": PDF_HASH,
-                    "layout_region_id": f"p{page_number:04d}_d{doc_order:06d}_{prov_idx:02d}",
-                    "page_number": int(page_number),
-                    "region_index": int(region_idx),
-                    "docling_doc_order": int(doc_order),
-                    "docling_reading_order": None,  # original Docling document order within this page
-                    "visual_overlay_order": None,   # column-aware overlay number; None before page-1 Introduction
-                    "layout_reading_order": None,   # column-aware language-model reading order
-                    "included_in_layout_reading_order": None,
-                    "reading_order_column": None,
-                    "reading_order_band": None,
-                    "reading_order_role": None,
-                    "reading_order_excluded_reason": None,
-                    "docling_self_ref": str(self_ref) if self_ref is not None else None,
-                    "docling_label": raw_label,
-                    "type": region_type,
-                    "content_layer": content_layer,
-                    "text": text if isinstance(text, str) else None,
-                    "orig": orig if isinstance(orig, str) else None,
-                    "score": None,
-                    "bbox_px": [float(x0), float(y0), float(x1), float(y1)],
-                    "bbox_docling": bbox_to_dict(bbox),
-                    "width_px": float(x1 - x0),
-                    "height_px": float(y1 - y0),
-                    "area_px": float(bbox_area(bbox_px)),
-                    "source": "docling",
-                })
-
-            return regions
-
-
+        # ---- Extracted production stage: Docling item conversion ----
         page_map = {int(r["page_number"]): r for r in page_records}
-        raw_regions = []
-
-        for item, level, doc_order in iter_docling_items(docling_doc):
-            raw_regions.extend(docling_item_to_regions(item, level, doc_order, page_map))
+        conversion_result = convert_docling_document(
+            docling_doc,
+            conversion.raw_document,
+            page_records,
+            document_id=DOC_ID,
+            pdf_hash=PDF_HASH,
+            page_start=PAGE_START,
+        )
+        raw_regions = conversion_result.regions
+        document_family = classify_document_family(raw_regions)
+        if config.heuristics.document_family != "auto":
+            document_family = {
+                **document_family,
+                "family": config.heuristics.document_family,
+                "configured": True,
+            }
+        region_conversion_diagnostics = {
+            "item_count": conversion_result.item_count,
+            "provenance_count": conversion_result.provenance_count,
+            "region_count": len(raw_regions),
+            "skipped_page_count": conversion_result.skipped_page_count,
+            "skipped_geometry_count": conversion_result.skipped_geometry_count,
+            "implementation": "envira_pdf_layout.region_conversion",
+        }
 
         raw_label_counts = Counter(r["docling_label"] for r in raw_regions)
         print("Raw Docling label counts before filtering:")
@@ -2043,12 +1906,6 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         # =============================================================================
         # Page-1 upper-frontmatter filter helpers
         # =============================================================================
-
-        PAGE1_UPPER_DROP_TEXT_RE = re.compile(
-            r"(contents\s+lists\s+available|science\s*direct|journal\s+homepage|"
-            r"elsevier|check\s+for\s+updates|cross\s*mark|crossmark)",
-            re.IGNORECASE,
-        )
 
         PAGE1_UPPER_DROP_LABELS = {
             "picture",
@@ -3074,7 +2931,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             if label in PAGE1_UPPER_DROP_LABELS:
                 return None
 
-            if PAGE1_UPPER_DROP_TEXT_RE.search(text):
+            if publisher_matches(text, config.heuristics.publisher_profiles):
                 return None
 
             # Standalone labels such as "Review" describe the article category rather
@@ -3399,10 +3256,20 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                     continue
 
                 # Drop known publisher/header/update text.
-                if PAGE1_UPPER_DROP_TEXT_RE.search(text):
-                    region["filter_reason"] = "page1_upper_publisher_or_update_text"
-                    dropped.append(region)
-                    continue
+                publisher_decision = page1_publisher_decision(
+                    text=text,
+                    center_y_ratio=ratios["cy"],
+                    title_bottom_ratio=title_y1,
+                    body_anchor_ratio=anchor_y0,
+                    enabled_profiles=config.heuristics.publisher_profiles,
+                    mode=config.heuristics.publisher_mode,
+                )
+                if publisher_decision.evidence[0].matched:
+                    region["heuristic_decision"] = publisher_decision.to_dict()
+                    if publisher_decision.action == "exclude":
+                        region["filter_reason"] = publisher_decision.reason
+                        dropped.append(region)
+                        continue
 
                 # Main robust rule:
                 # Drop anything between article title bottom and first ARTICLE INFO / ABSTRACT / SUMMARY / Keywords top.
@@ -9785,32 +9652,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
 
 
 
-        COMPACT_FOOTER_PUBLISHER_RE = re.compile(
-            r"\b(?:"
-            r"springer(?:\s+nature)?|"
-            r"elsevier|"
-            r"wiley(?:\s+blackwell)?|"
-            r"taylor\s*(?:&|and)?\s*francis|"
-            r"sage|"
-            r"mdpi|"
-            r"frontiers|"
-            r"nature(?:\s+portfolio)?|"
-            r"biomed\s+central|"
-            r"bmc|"
-            r"oxford\s+university\s+press|"
-            r"cambridge\s+university\s+press"
-            r")\b",
-            re.IGNORECASE,
-        )
-
-
         def _compact_footer_publisher_tokens(text: Any) -> List[str]:
             """Return normalized publisher/imprint tokens found in footer text."""
-            normalized = " ".join(str(text or "").split())
-            return sorted({
-                match.group(0).strip().lower()
-                for match in COMPACT_FOOTER_PUBLISHER_RE.finditer(normalized)
-            })
+            if config.heuristics.publisher_mode in {"disabled", "evidence_only"}:
+                return []
+            return publisher_tokens(
+                str(text or ""), config.heuristics.publisher_profiles
+            )
 
 
         def _compact_footer_region_profile(
@@ -9957,15 +9805,6 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 "aspect_ratio": float(aspect_ratio),
                 "ratios": ratios,
             }
-
-
-        COMPACT_FOOTER_PUBLISHER_WORD_RE = re.compile(
-            r"^(?:"
-            r"springer|elsevier|wiley|blackwell|taylor|francis|sage|mdpi|"
-            r"frontiers|nature|bmc|oxford|cambridge"
-            r")$",
-            re.IGNORECASE,
-        )
 
 
         def _compact_footer_context_bbox(
@@ -10148,9 +9987,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 )
                 if not normalized_word:
                     continue
-                if not COMPACT_FOOTER_PUBLISHER_WORD_RE.match(
-                    normalized_word
-                ):
+                if not _compact_footer_publisher_tokens(normalized_word):
                     continue
 
                 wx0, wy0, wx1, wy1 = map(float, word[:4])
@@ -14284,7 +14121,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             List[Dict[str, Any]],
             Dict[str, Any],
         ]:
-            """Keep Figure/Table parents and remove child detections inside them."""
+            """Annotate former exclusions as proposals without deleting detections."""
             analysis = analyze_nested_asset_elements(regions, page_map)
             drop_ids = {
                 str(region_id)
@@ -14296,21 +14133,18 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             }
 
             kept = []
-            dropped = []
+            would_have_dropped = []
             for region in regions:
                 region_id = _nested_asset_region_id(region)
-                if region_id not in drop_ids:
-                    kept.append(region)
-                    continue
-
                 decision = decision_by_id.get(region_id, {})
-                row = dict(region)
+                row = region
+                if region_id not in drop_ids:
+                    kept.append(row)
+                    continue
                 parent_kind = str(
                     decision.get("parent_asset_kind", "asset")
                 )
-                row["filter_reason"] = (
-                    f"nested_inside_{parent_kind}"
-                )
+                row["nested_asset_previous_filter_reason"] = f"nested_inside_{parent_kind}"
                 row["nested_asset_parent_region_id"] = (
                     decision.get("parent_asset_region_id")
                 )
@@ -14320,9 +14154,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 row["nested_asset_overlap_metrics"] = (
                     decision.get("metrics")
                 )
-                dropped.append(row)
+                row["nested_asset_disposition"] = "hierarchy_candidate"
+                kept.append(row)
+                would_have_dropped.append(dict(row))
 
-            return kept, dropped, analysis
+            analysis["would_have_excluded"] = would_have_dropped
+            analysis["authoritative_mode"] = "non_destructive_proposals"
+            return kept, [], analysis
 
 
         def debug_nested_asset_elements(
@@ -14849,6 +14687,24 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             if str(region.get("layout_region_id"))
             not in page1_combined_drop_ids
         ]
+        if config.content_policy.retain_front_matter:
+            restored_front_matter = (
+                page1_upper_excluded_regions
+                + page1_lower_excluded_regions
+                + page1_post_abstract_excluded_regions
+            )
+            filtered_regions.extend(
+                {
+                    **region,
+                    "content_policy_disposition": "retained_front_matter",
+                }
+                for region in restored_front_matter
+            )
+            page1_upper_excluded_regions = []
+            page1_lower_excluded_regions = []
+            page1_post_abstract_excluded_regions = []
+        else:
+            restored_front_matter = []
 
         # Fourth-step cleanup for pages after page 1: remove dynamically detected
         # running headers. The filter combines Docling-region recurrence with an
@@ -14882,6 +14738,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         # anchors the detected panel, while the rendered-page image is inspected for a
         # substantial unboxed visual band immediately above it. The original region id
         # is retained and only its bbox is expanded.
+        pre_completion_regions = list(filtered_regions)
         (
             filtered_regions,
             caption_figure_completion_analysis,
@@ -14889,6 +14746,20 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             filtered_regions,
             raw_regions,
             page_map,
+        )
+        figure_completion_validation = validate_figure_completions(
+            filtered_regions,
+            pre_completion_regions,
+            max_area_multiplier=config.figures.max_completion_area_multiplier,
+            max_page_area_ratio=config.figures.max_completion_page_area_ratio,
+            max_edge_growth_ratio=config.figures.max_completion_edge_growth_ratio,
+            paragraph_min_chars=config.figures.completion_paragraph_min_chars,
+            min_assignment_score=config.figures.completion_min_assignment_score,
+            pages=page_records,
+        )
+        filtered_regions = figure_completion_validation.regions
+        caption_figure_completion_analysis["validation"] = (
+            figure_completion_validation.diagnostics
         )
 
 
@@ -14944,6 +14815,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             filtered_regions,
             page_map,
         )
+
+        content_policy_retained, post_conclusion_excluded_regions, content_policy_decisions = apply_content_policy(
+            post_conclusion_excluded_regions,
+            config.content_policy,
+            language=config.heuristics.language,
+        )
+        filtered_regions.extend(content_policy_retained)
 
         (
             post_body_asset_records,
@@ -15613,6 +15491,24 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         "document_tail": post_conclusion_excluded_regions,
     }
     diagnostics = {
+        "region_conversion": region_conversion_diagnostics,
+        "document_family": document_family,
+        "heuristic_profiles": {
+            "publisher_profiles": list(config.heuristics.publisher_profiles),
+            "publisher_mode": config.heuristics.publisher_mode,
+            "page1_decisions": [
+                region["heuristic_decision"]
+                for region in raw_regions
+                if region.get("heuristic_decision")
+            ],
+        },
+        "content_policy": {
+            "decisions": content_policy_decisions,
+            "retained_region_ids": [r["layout_region_id"] for r in content_policy_retained],
+            "retained_front_matter_region_ids": [
+                r["layout_region_id"] for r in restored_front_matter
+            ],
+        },
         "page1": page1_post_abstract_metadata_analysis,
         "later_headers": later_page_upper_header_analysis,
         "small_edge_figures": small_edge_figure_analysis,
