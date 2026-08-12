@@ -5,8 +5,9 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from .caption_overlap import build_caption_groups
+from .caption_association import associate_captions
 from .independent_core import run_independent_core
-from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
+from .layout_overlap import resolve_layout_overlaps
 from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
 from .table_context import associate_table_context
 
@@ -64,8 +65,8 @@ def run_layout_pipeline(conversion, page_set, config):
     # Backward-compatible caption inspection now receives authoritative rather
     # than provisional containment outcomes.
     result.caption_overlap_relationships = list(result.layout_relationships)
-    semantic_associations = associate_attachable_context(
-        result.resolved_regions, result.pages
+    semantic_associations = associate_captions(
+        result.resolved_regions, result.pages, config=config.caption_association
     )
     result.layout_relationships.extend(semantic_associations)
     result.diagnostics["caption_association"] = {

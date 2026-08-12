@@ -422,5 +422,10 @@ def associate_attachable_context(
 ) -> list[dict[str, Any]]:
     """Compatibility wrapper for the authoritative caption-association stage."""
     from .caption_association import associate_captions
+    from .config import CaptionAssociationConfig
 
-    return associate_captions(regions, pages, ambiguity_margin=ambiguity_margin)
+    return associate_captions(
+        regions,
+        pages,
+        config=CaptionAssociationConfig(ambiguity_margin=ambiguity_margin),
+    )

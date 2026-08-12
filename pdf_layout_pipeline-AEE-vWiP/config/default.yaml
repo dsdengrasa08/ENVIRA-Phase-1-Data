@@ -46,6 +46,13 @@ caption_overlap:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_page_ratio: 0.008
   boundary_overlap_ratio: 0.20
+caption_association:
+  enabled: true
+  max_vertical_gap_page_ratio: 0.10
+  min_horizontal_overlap_ratio: 0.18
+  blocker_horizontal_overlap_ratio: 0.25
+  acceptance_score: 0.35
+  ambiguity_margin: 0.15
 overlap_resolution:
   enabled: true
   # Destructive canonicalization is deliberately high precision. Calibrate

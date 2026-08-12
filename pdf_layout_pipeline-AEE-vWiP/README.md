@@ -119,6 +119,8 @@ identifiers constrain eligible parent classes; detector-only captions use the sa
 geometry, column, direction, blocker, and ambiguity checks. Every candidate emits
 an associated, unresolved, or unattached relationship, and no caption association
 resizes, reclassifies, suppresses, or silently selects a parent by input order.
+All ownership thresholds live in the typed `caption_association` configuration
+section and the effective values are captured with the run configuration.
 
 ## Logical table context
 
