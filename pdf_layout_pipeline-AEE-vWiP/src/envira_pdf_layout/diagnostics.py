@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import pandas as pd
+from .stage_trace import tabular_trace
 
 
 def stage_exclusions(run, stage):
@@ -23,7 +24,8 @@ def header_diagnostics(run):
 
 
 def figure_completion_diagnostics(run):
-    return stage_diagnostics(run, "figure_completion")
+    validation = run.diagnostics.get("figure_completion", {}).get("validation", {})
+    return pd.DataFrame(validation.get("proposals", []))
 
 
 def footer_diagnostics(run):
@@ -73,3 +75,16 @@ def overlap_resolution_diagnostics(run, page_number=None):
         if page_number is None or relationship["page_number"] == page_number
     ]
     return pd.DataFrame(rows)
+
+
+def nested_hierarchy_diagnostics(run, page_number=None):
+    """Return accepted and ambiguous non-destructive containment decisions."""
+    rows = run.diagnostics.get("nested_hierarchy", {}).get("decisions", [])
+    if page_number is not None:
+        rows = [row for row in rows if row.get("page_number") == page_number]
+    return pd.DataFrame(rows)
+
+
+def stage_trace_diagnostics(run):
+    """Return compact before/after counts and invariants for every major stage."""
+    return pd.DataFrame(tabular_trace(run.stage_trace))
