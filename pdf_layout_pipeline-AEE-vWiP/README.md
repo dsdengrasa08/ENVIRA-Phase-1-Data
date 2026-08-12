@@ -33,15 +33,21 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `independent_core.py`: package-owned extraction of the established item
-  conversion, page-1 recovery, filters, asset recovery, reading order, and output
-  construction. Its preserved stage ordering is the production implementation.
+- `independent_core.py`: package-owned orchestration of the remaining established
+  page-1 recovery, filters, asset recovery, reading order, and output construction.
+  Its preserved stage ordering remains the production implementation while stages
+  are migrated incrementally under equivalence tests.
 - `authoritative.py`: compatibility alias for callers using the former entry point;
   it delegates directly to the independent package core and does not load a
   notebook.
-- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: smaller
-  independently testable compatibility helpers; the production core retains the
-  complete established heuristics in `independent_core.py`.
+- `region_conversion.py`: the active Docling-to-ENVIRA conversion boundary. It
+  supports object and serialized Docling documents, preserves production IDs and
+  fields, and reports skipped provenance explicitly.
+- `stages.py`: the small context and transform-stage contracts used for incremental
+  extraction from the preserved core.
+- `filtering/`, `assets/`, `reading_order.py`: smaller independently testable
+  compatibility helpers. Until each is migrated under equivalence tests, the
+  corresponding established production heuristic remains in `independent_core.py`.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
