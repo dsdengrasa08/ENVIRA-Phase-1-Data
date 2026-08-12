@@ -359,7 +359,16 @@ def associate_attachable_context(regions, pages, *, ambiguity_margin: float = 0.
                 same_column = candidate.get("reading_order_column") in {None, "single", parent.get("reading_order_column")} or parent.get("reading_order_column") in {None, "single"}
                 if not same_column:
                     continue
-                score = 0.55 * horizontal + 0.35 * max(0.0, 1.0 - vertical_gap / 0.10) + 0.10 * (candidate.get("type") == "Caption")
+                text_match = re.match(r"^\s*(?P<kind>table|tab\.?|fig(?:ure)?\.?|equation|eq\.?)\b", _text(candidate), re.I)
+                lexical_type = None
+                if text_match:
+                    token = text_match.group("kind").casefold()
+                    lexical_type = "Table" if token.startswith("tab") else "Figure" if token.startswith("fig") else "Formula"
+                parent_type = str(parent.get("type") or "")
+                compatible = lexical_type is None or lexical_type == parent_type or (lexical_type == "Formula" and parent_type in FORMULA_FAMILY)
+                caption_below = cb[1] >= pb[3]
+                expected_direction = caption_below if lexical_type == "Figure" else cb[3] <= pb[1] if lexical_type == "Table" else True
+                score = 0.45 * horizontal + 0.30 * max(0.0, 1.0 - vertical_gap / 0.10) + 0.10 * (candidate.get("type") == "Caption") + (0.15 if compatible else -0.35) + (0.10 if expected_direction else -0.10)
                 alternatives.append((score, parent))
             alternatives.sort(key=lambda item: item[0], reverse=True)
             if not alternatives:

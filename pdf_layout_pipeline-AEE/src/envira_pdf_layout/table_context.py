@@ -145,7 +145,9 @@ def _score_edge(
         "raw_class": (
             2.0
             if role == "caption" and candidate.get("type") == "Caption"
-            else 1.4 if role == "note" and candidate.get("type") == "Footnote" else 0.0
+            else 1.4
+            if role == "note" and candidate.get("type") == "Footnote"
+            else 0.0
         ),
         "identifier_lexical": 1.8 if label_match and role == "caption" else 0.0,
         "note_lexical": 1.5 if note_match and role == "note" else 0.0,
@@ -465,6 +467,12 @@ def associate_table_context(
                         candidate.get("type") == "Caption"
                         or _TABLE_LABEL_RE.match(str(candidate.get("text") or ""))
                     ):
+                        continue
+                    # A semantic split has already classified this caption. Do
+                    # not let proximity reclaim a Figure segment for a table.
+                    if role == "caption" and candidate.get(
+                        "caption_object_type"
+                    ) not in {None, "Table"}:
                         continue
                     if role == "note" and not (
                         candidate.get("type") == "Footnote"

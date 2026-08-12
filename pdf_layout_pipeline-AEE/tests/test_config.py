@@ -1,6 +1,7 @@
 from pathlib import Path
 import pytest
 from envira_pdf_layout.config import (
+    CaptionValidationConfig,
     DocumentConfig,
     OverlapResolutionConfig,
     PipelineConfig,
@@ -44,4 +45,11 @@ def test_invalid_generalized_overlap_ratio():
     with pytest.raises(ValueError):
         PipelineConfig(
             overlap_resolution=OverlapResolutionConfig(duplicate_iou=1.1)
+        ).validate()
+
+
+def test_invalid_caption_validation_controls():
+    with pytest.raises(ValueError):
+        PipelineConfig(
+            caption_validation=CaptionValidationConfig(max_parent_gap_page_ratio=1.1)
         ).validate()
