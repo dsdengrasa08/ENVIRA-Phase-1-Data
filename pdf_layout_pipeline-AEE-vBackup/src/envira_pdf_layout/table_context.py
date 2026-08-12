@@ -25,8 +25,17 @@ _NEW_OBJECT_RE = re.compile(
     r"^\s*(?:fig(?:ure)?\.?|equation|eq\.?|algorithm|listing)\s+\w+",
     re.IGNORECASE,
 )
-_TEXT_TYPES = {"Text", "Caption", "Footnote", "Section-header", "Title", "List"}
-_FRAGMENT_TYPES = {"Text", "Caption", "List"}
+_TEXT_TYPES = {
+    "Text",
+    "Caption",
+    "Figure Caption",
+    "Table Caption",
+    "Footnote",
+    "Section-header",
+    "Title",
+    "List",
+}
+_FRAGMENT_TYPES = {"Text", "Caption", "Table Caption", "List"}
 _BOUNDARY_TYPES = {"Table", "Figure", "Section-header", "Title"}
 
 
@@ -462,7 +471,7 @@ def associate_table_context(
                     continue
                 for role in ("caption", "note"):
                     if role == "caption" and not (
-                        candidate.get("type") == "Caption"
+                        candidate.get("type") in {"Caption", "Table Caption"}
                         or _TABLE_LABEL_RE.match(str(candidate.get("text") or ""))
                     ):
                         continue

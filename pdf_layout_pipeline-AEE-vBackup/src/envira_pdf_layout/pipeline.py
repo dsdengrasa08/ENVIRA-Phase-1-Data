@@ -8,6 +8,7 @@ from .authoritative import run_authoritative_pipeline
 from copy import deepcopy
 
 from .caption_overlap import build_caption_groups
+from .caption_decomposition import decompose_captions
 from .layout_overlap import associate_attachable_context, resolve_layout_overlaps
 from .table_context import associate_table_context
 
@@ -51,6 +52,30 @@ def run_layout_pipeline(conversion, page_set, config):
     result.caption_overlap_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
     result.suppressed_regions = resolution.suppressed
+    result.resolved_regions, decomposition = decompose_captions(
+        result.resolved_regions,
+        result.pages,
+        result.document,
+        config.caption_decomposition,
+    )
+    result.diagnostics["caption_decomposition"] = {
+        "candidate_count": len(decomposition),
+        "decomposed_count": sum(
+            item["status"] == "decomposed" for item in decomposition
+        ),
+        "candidates": decomposition,
+    }
+    # Derived children replace one atomic source region, so recompute the
+    # relationship graph before semantic parent association.
+    if any(item["status"] == "decomposed" for item in decomposition):
+        refreshed = resolve_layout_overlaps(
+            result.resolved_regions, result.pages, config.overlap_resolution
+        )
+        result.resolved_regions = refreshed.regions
+        result.layout_relationships = list(refreshed.relationships)
+        result.caption_overlap_relationships = list(refreshed.relationships)
+        result.resolution_decisions.extend(refreshed.decisions)
+        result.suppressed_regions.extend(refreshed.suppressed)
     semantic_associations = associate_attachable_context(
         result.resolved_regions, result.pages
     )

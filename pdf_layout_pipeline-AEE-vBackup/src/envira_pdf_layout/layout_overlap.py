@@ -20,7 +20,7 @@ from .types import LayoutRegion
 
 
 TEXT_FAMILY = {
-    "Caption", "Text", "Footnote", "Section-header", "Title", "List",
+    "Caption", "Figure Caption", "Table Caption", "Text", "Footnote", "Section-header", "Title", "List",
     "Reference", "Page-header", "Page-footer", "Code",
 }
 ASSET_FAMILY = {"Table", "Figure"}
@@ -344,13 +344,16 @@ def associate_attachable_context(regions, pages, *, ambiguity_margin: float = 0.
         parents = [r for r in page_regions if class_family(r) in {"asset", "formula"}]
         candidates = [
             r for r in page_regions
-            if r.get("type") == "Caption"
+            if r.get("type") in {"Caption", "Figure Caption", "Table Caption"}
             or re.match(r"^\s*(?:table|fig(?:ure)?\.?|equation|eq\.?|algorithm|listing)\b", _text(r), re.I)
         ]
         for candidate in candidates:
             cb = list(map(float, candidate["bbox_px"]))
             alternatives = []
             for parent in parents:
+                expected = {"Figure Caption": "Figure", "Table Caption": "Table"}.get(candidate.get("type"))
+                if expected and parent.get("type") != expected:
+                    continue
                 pb = list(map(float, parent["bbox_px"]))
                 horizontal = max(0.0, min(cb[2], pb[2]) - max(cb[0], pb[0])) / max(1.0, min(cb[2]-cb[0], pb[2]-pb[0]))
                 vertical_gap = max(0.0, max(cb[1], pb[1]) - min(cb[3], pb[3])) / height
