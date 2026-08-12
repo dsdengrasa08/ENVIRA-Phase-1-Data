@@ -23,7 +23,8 @@ def header_diagnostics(run):
 
 
 def figure_completion_diagnostics(run):
-    return stage_diagnostics(run, "figure_completion")
+    validation = run.diagnostics.get("figure_completion", {}).get("validation", {})
+    return pd.DataFrame(validation.get("proposals", []))
 
 
 def footer_diagnostics(run):

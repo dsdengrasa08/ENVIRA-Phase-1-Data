@@ -139,6 +139,11 @@ class FigureFilterConfig:
     filter_small_edge_figures: bool = True
     header_y1_max: float = 0.12
     footer_y0_min: float = 0.90
+    max_completion_area_multiplier: float = 4.0
+    max_completion_page_area_ratio: float = 0.65
+    max_completion_edge_growth_ratio: float = 0.45
+    completion_paragraph_min_chars: int = 80
+    completion_min_assignment_score: float = 7.0
 
 
 @dataclass(frozen=True)
@@ -494,6 +499,16 @@ class PipelineConfig:
             raise ValueError("page1 title_y_min must not exceed title_y_max")
         if self.headers.min_repeat_pages < 1 or self.footer.min_repeat_pages < 1:
             raise ValueError("repeat-page thresholds must be positive")
+        if self.figures.max_completion_area_multiplier < 1:
+            raise ValueError(
+                "figures.max_completion_area_multiplier must be at least 1"
+            )
+        if self.figures.completion_paragraph_min_chars < 1:
+            raise ValueError("figures.completion_paragraph_min_chars must be positive")
+        if self.figures.completion_min_assignment_score < 0:
+            raise ValueError(
+                "figures.completion_min_assignment_score must be non-negative"
+            )
         if self.heuristics.publisher_mode not in {
             "disabled",
             "evidence_only",

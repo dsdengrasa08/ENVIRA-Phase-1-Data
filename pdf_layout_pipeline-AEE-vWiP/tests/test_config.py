@@ -153,3 +153,8 @@ def test_unknown_publisher_profile_is_rejected():
         PipelineConfig.load(
             environ={}, heuristics={"publisher_profiles": ["one_document_hack"]}
         )
+
+
+def test_invalid_figure_completion_limits_are_rejected():
+    with pytest.raises(ValueError, match="area_multiplier"):
+        PipelineConfig.load(environ={}, figures={"max_completion_area_multiplier": 0.5})

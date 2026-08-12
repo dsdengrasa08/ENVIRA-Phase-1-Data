@@ -12,6 +12,11 @@ headers:
   enabled: true
 figures:
   complete_caption_anchored: true
+  max_completion_area_multiplier: 4.0
+  max_completion_page_area_ratio: 0.65
+  max_completion_edge_growth_ratio: 0.45
+  completion_paragraph_min_chars: 80
+  completion_min_assignment_score: 7.0
 footer:
   enabled: true
 tail:

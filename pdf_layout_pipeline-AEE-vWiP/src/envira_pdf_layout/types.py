@@ -37,6 +37,7 @@ class ArtifactPaths:
     physical_regions_jsonl: Path
     top_level_regions_jsonl: Path
     nested_regions_jsonl: Path
+    figure_completion_proposals_jsonl: Path
     summary_csv: Path
 
 

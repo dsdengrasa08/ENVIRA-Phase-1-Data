@@ -398,3 +398,58 @@ def render_nested_hierarchy_overlay(run, page_number, output_path: Path | None =
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_path), image)
     return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
+
+
+def render_figure_completion_overlay(run, page_number, output_path: Path | None = None):
+    """Render source/proposed geometry, newly captured regions, and hard barriers."""
+    import cv2
+
+    page = next(page for page in run.pages if page["page_number"] == page_number)
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    by_id = {
+        str(region["layout_region_id"]): region
+        for region in run.physical_regions
+        if int(region["page_number"]) == page_number
+    }
+    proposals = (
+        run.diagnostics.get("figure_completion", {})
+        .get("validation", {})
+        .get("proposals", [])
+    )
+    for proposal in proposals:
+        if int(proposal["page_number"]) != page_number:
+            continue
+        source = int_bbox(tuple(proposal["source_bbox_px"]))
+        proposed = int_bbox(tuple(proposal["proposed_bbox_px"]))
+        color = (
+            (0, 180, 0)
+            if proposal["decision"].startswith("accepted")
+            else (0, 0, 220)
+            if proposal["decision"].startswith("rejected")
+            else (0, 150, 255)
+        )
+        cv2.rectangle(image, source[:2], source[2:], (150, 150, 150), 2, cv2.LINE_AA)
+        cv2.rectangle(image, proposed[:2], proposed[2:], color, 3, cv2.LINE_AA)
+        _label(
+            image,
+            proposal["decision"],
+            (proposed[0] + 3, max(18, proposed[1] + 16)),
+            color,
+        )
+        for region_id in proposal["newly_captured_region_ids"]:
+            region = by_id.get(str(region_id))
+            if region:
+                box = int_bbox(tuple(region["bbox_px"]))
+                region_color = (
+                    (0, 0, 255)
+                    if region_id in proposal["barrier_region_ids"]
+                    else (255, 180, 0)
+                )
+                cv2.rectangle(image, box[:2], box[2:], region_color, 2, cv2.LINE_AA)
+    _label(image, f"Figure completion | page {page_number}", (24, 36), (0, 0, 255))
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)

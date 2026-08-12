@@ -31,3 +31,5 @@ def test_workflow_displays_resolved_caption_outputs():
     assert "suppressed_regions_dataframe" in source
     assert "render_overlap_resolution_overlay" in source
     assert "overlap_resolution_diagnostics" in source
+    assert "render_figure_completion_overlay" in source
+    assert "figure_completion_geometry_summary_dataframe" in source

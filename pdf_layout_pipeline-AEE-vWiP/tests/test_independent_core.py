@@ -37,6 +37,15 @@ def test_core_nested_asset_stage_is_non_destructive():
     assert "return kept, [], analysis" in source
 
 
+def test_figure_completion_is_validated_before_nested_analysis():
+    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    validation = source.index(
+        "figure_completion_validation = validate_figure_completions("
+    )
+    nesting = source.index("filter_nested_asset_elements(", validation)
+    assert validation < nesting
+
+
 def test_runtime_modules_do_not_load_or_execute_a_notebook():
     for filename in ("pipeline.py", "authoritative.py", "independent_core.py"):
         source = (PACKAGE / filename).read_text(encoding="utf-8")

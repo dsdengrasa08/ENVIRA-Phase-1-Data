@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .content_policy import apply_content_policy
+from .figure_completion import validate_figure_completions
 from .heuristics import (
     classify_document_family,
     page1_publisher_decision,
@@ -14737,6 +14738,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         # anchors the detected panel, while the rendered-page image is inspected for a
         # substantial unboxed visual band immediately above it. The original region id
         # is retained and only its bbox is expanded.
+        pre_completion_regions = list(filtered_regions)
         (
             filtered_regions,
             caption_figure_completion_analysis,
@@ -14744,6 +14746,20 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             filtered_regions,
             raw_regions,
             page_map,
+        )
+        figure_completion_validation = validate_figure_completions(
+            filtered_regions,
+            pre_completion_regions,
+            max_area_multiplier=config.figures.max_completion_area_multiplier,
+            max_page_area_ratio=config.figures.max_completion_page_area_ratio,
+            max_edge_growth_ratio=config.figures.max_completion_edge_growth_ratio,
+            paragraph_min_chars=config.figures.completion_paragraph_min_chars,
+            min_assignment_score=config.figures.completion_min_assignment_score,
+            pages=page_records,
+        )
+        filtered_regions = figure_completion_validation.regions
+        caption_figure_completion_analysis["validation"] = (
+            figure_completion_validation.diagnostics
         )
 
 

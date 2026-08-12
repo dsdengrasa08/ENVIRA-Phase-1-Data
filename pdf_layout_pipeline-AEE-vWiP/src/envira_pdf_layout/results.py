@@ -54,6 +54,34 @@ def hierarchy_counts_dataframe(run):
     )
 
 
+def figure_completion_proposals_dataframe(run):
+    """Return accepted, rejected, and ambiguous completion proposals."""
+    return pd.DataFrame(
+        run.diagnostics.get("figure_completion", {})
+        .get("validation", {})
+        .get("proposals", [])
+    )
+
+
+def figure_completion_geometry_summary_dataframe(run):
+    proposals = figure_completion_proposals_dataframe(run)
+    if not len(proposals):
+        return proposals
+    return proposals[
+        [
+            "page_number",
+            "figure_region_id",
+            "decision",
+            "reason",
+            "confidence",
+            "growth",
+            "newly_captured_region_ids",
+            "barrier_region_ids",
+            "competing_asset_ids",
+        ]
+    ]
+
+
 def layout_relationships_dataframe(run):
     """Return every generalized duplicate, hierarchy, conflict, and association edge."""
     return pd.DataFrame(run.layout_relationships)

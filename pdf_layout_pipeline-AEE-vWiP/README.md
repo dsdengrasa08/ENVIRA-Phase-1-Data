@@ -93,6 +93,15 @@ separate contiguous top-level and parent-local sequences. Explicit exports are
 `nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
 core-filtered physical input.
 
+Caption-anchored figure completion is likewise proposal-based. The preserved image
+detector proposes geometry, then `figure_completion.py` validates caption confidence,
+growth, page bounds, newly captured regions, structural barriers, competing assets,
+and column-gutter crossings before downstream filtering. Rejected and ambiguous
+proposals restore detector geometry. Every proposal preserves source, proposed,
+resolved, visual-crop, and semantic-group boxes plus deterministic geometry history.
+Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
+with a source/proposal/barrier overlay in the workflow notebook.
+
 ## Logical table context
 
 After the core filters and reading-order assignment, the package creates
