@@ -74,6 +74,9 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         "PHASE1_LATER_PAGE_UPPER_HEADER_FILTER": str(int(config.headers.enabled)),
         "PHASE1_LATER_PAGE_HEADER_CANDIDATE_Y_MAX": str(config.headers.top_band_ratio),
         "PHASE1_LATER_PAGE_HEADER_MIN_REPEAT_PAGES": str(config.headers.min_repeat_pages),
+        "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_FALLBACK": str(int(config.headers.roi_ocr_fallback)),
+        "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_DPI": str(config.headers.roi_ocr_dpi),
+        "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_LANGUAGE": config.headers.roi_ocr_language,
         "PHASE1_SMALL_EDGE_FIGURE_FILTER": str(int(config.figures.filter_small_edge_figures)),
         "PHASE1_CAPTION_FIGURE_COMPLETION": str(int(config.figures.complete_caption_anchored)),
         "PHASE1_SMALL_EDGE_FIGURE_HEADER_Y1_MAX": str(config.figures.header_y1_max),
@@ -5600,52 +5603,21 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             ))
 
 
+        from envira_pdf_layout.roi_ocr import RoiOcrError, RoiOcrSession
+
+        _header_roi_ocr = RoiOcrSession(
+            dpi=LATER_PAGE_HEADER_PDF_ROI_OCR_DPI,
+            language=LATER_PAGE_HEADER_PDF_ROI_OCR_LANGUAGE,
+            cache_enabled=config.headers.roi_ocr_cache,
+            disable_after_failure=config.headers.roi_ocr_disable_after_failure,
+        )
+
         def _ocr_source_pdf_roi_words(
             page: fitz.Page,
             roi: fitz.Rect,
         ) -> List[Tuple[Any, ...]]:
             """OCR only the top ROI and map words back to source-PDF coordinates."""
-            zoom = float(LATER_PAGE_HEADER_PDF_ROI_OCR_DPI) / 72.0
-            pix = page.get_pixmap(
-                matrix=fitz.Matrix(zoom, zoom),
-                clip=roi,
-                alpha=False,
-            )
-
-            ocr_bytes = pix.pdfocr_tobytes(
-                language=LATER_PAGE_HEADER_PDF_ROI_OCR_LANGUAGE,
-            )
-            ocr_doc = fitz.open(stream=ocr_bytes, filetype="pdf")
-
-            try:
-                ocr_page = ocr_doc.load_page(0)
-                ocr_rect = ocr_page.rect
-                words = ocr_page.get_text("words", sort=True)
-
-                sx = roi.width / max(float(ocr_rect.width), 1e-9)
-                sy = roi.height / max(float(ocr_rect.height), 1e-9)
-
-                mapped = []
-                for raw_word in words:
-                    if len(raw_word) < 8:
-                        continue
-
-                    x0, y0, x1, y1, text, block_no, line_no, word_no = raw_word[:8]
-                    mapped.append((
-                        float(roi.x0) + float(x0) * sx,
-                        float(roi.y0) + float(y0) * sy,
-                        float(roi.x0) + float(x1) * sx,
-                        float(roi.y0) + float(y1) * sy,
-                        text,
-                        block_no,
-                        line_no,
-                        word_no,
-                    ))
-
-                return mapped
-
-            finally:
-                ocr_doc.close()
+            return _header_roi_ocr.words(page, roi, fitz)
 
 
         def extract_later_page_pdf_roi_lines(
@@ -5704,6 +5676,8 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 "lines": direct_lines,
                 "ocr_attempted": False,
                 "ocr_error": None,
+                "ocr_error_category": None,
+                "ocr_error_retryable": None,
             }
 
             if plausible_direct_lines or not allow_ocr:
@@ -5725,6 +5699,12 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                     result["lines"] = ocr_lines
             except Exception as exc:
                 result["ocr_error"] = f"{type(exc).__name__}: {exc}"
+                if isinstance(exc, RoiOcrError):
+                    result["ocr_error_category"] = exc.category
+                    result["ocr_error_retryable"] = exc.retryable
+                else:
+                    result["ocr_error_category"] = "unexpected_ocr_failure"
+                    result["ocr_error_retryable"] = True
 
             return result
 
@@ -6116,7 +6096,9 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
 
                     # If Tesseract is unavailable, avoid repeating the same expensive
                     # failing fallback on every remaining page.
-                    if extraction.get("ocr_error"):
+                    if extraction.get("ocr_error") and not extraction.get(
+                        "ocr_error_retryable", True
+                    ):
                         ocr_allowed = False
             finally:
                 doc.close()
@@ -15511,6 +15493,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         },
         "page1": page1_post_abstract_metadata_analysis,
         "later_headers": later_page_upper_header_analysis,
+        "header_roi_ocr": _header_roi_ocr.diagnostics(),
         "small_edge_figures": small_edge_figure_analysis,
         "figure_completion": caption_figure_completion_analysis,
         "nested_assets": nested_asset_element_analysis,

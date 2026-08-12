@@ -58,6 +58,10 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   hierarchy/conflict/fragment analysis, and attachable-parent association.
 - `caption_association.py`: authoritative, class-aware and non-destructive
   caption ownership with explicit ambiguity and unattached outcomes.
+- `roi_ocr.py`: cached, ROI-only OCR with source-coordinate mapping, guaranteed
+  resource cleanup, geometry validation, categorized contextual failures, and a
+  dependency-only circuit breaker. Page-local OCR failures remain isolated and do
+  not prevent fallback attempts on later pages.
 
 ## Generalized overlap resolution
 

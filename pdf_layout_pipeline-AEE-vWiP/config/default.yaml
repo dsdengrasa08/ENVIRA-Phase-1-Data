@@ -10,6 +10,11 @@ page1:
   abstract_aliases: [Abstract, Summary]
 headers:
   enabled: true
+  roi_ocr_fallback: true
+  roi_ocr_dpi: 300
+  roi_ocr_language: eng
+  roi_ocr_cache: true
+  roi_ocr_disable_after_failure: true
 figures:
   complete_caption_anchored: true
   max_completion_area_multiplier: 4.0

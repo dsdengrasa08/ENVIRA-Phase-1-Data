@@ -130,6 +130,11 @@ class HeaderFilterConfig:
     enabled: bool = True
     top_band_ratio: float = 0.14
     min_repeat_pages: int = 2
+    roi_ocr_fallback: bool = True
+    roi_ocr_dpi: int = 300
+    roi_ocr_language: str = "eng"
+    roi_ocr_cache: bool = True
+    roi_ocr_disable_after_failure: bool = True
 
 
 @dataclass(frozen=True)
@@ -394,6 +399,18 @@ class PipelineConfig:
             ),
             "PHASE1_DOCLING_DO_CODE_ENRICHMENT": ("docling", "do_code_enrichment"),
             "PHASE1_DOCLING_CODE_FORMULA_PRESET": ("docling", "code_formula_preset"),
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_FALLBACK": (
+                "headers",
+                "roi_ocr_fallback",
+            ),
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_DPI": (
+                "headers",
+                "roi_ocr_dpi",
+            ),
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_LANGUAGE": (
+                "headers",
+                "roi_ocr_language",
+            ),
         }
         # Every typed field has a predictable environment spelling; the mappings
         # above retain compatibility with established shorter variable names.
@@ -631,3 +648,7 @@ class PipelineConfig:
         ):
             if getattr(self.containment, name) < 1:
                 raise ValueError(f"containment {name} must be positive")
+        if self.headers.roi_ocr_dpi < 72:
+            raise ValueError("headers roi_ocr_dpi must be at least 72")
+        if not self.headers.roi_ocr_language.strip():
+            raise ValueError("headers roi_ocr_language must not be empty")

@@ -10,6 +10,7 @@ filenames, hashes, or document-specific exceptions.
 | Page-1 upper | Confirm publisher furniture | named publisher term profile | publisher-specific lexical | yes | must agree with geometry/structure in `confirmatory` mode |
 | Page-1 lower | Exclude metadata | lower-page position, short clusters, contact/affiliation terms | scholarly structure and English lexical | yes | paragraph/body protections |
 | Later headers | Exclude header | top-band position, recurrence, source-PDF row geometry | generic geometry/recurrence | yes | caption/asset and body protections |
+| Header ROI OCR | Supply fallback evidence | OCR only when the source text layer has no plausible shallow line | generic extraction fallback | no | typed controls, validated ROI, per-ROI cache, categorized failures, dependency-only circuit breaker, diagnostics |
 | Figure completion | Expand asset | caption assignment, image ink bands, blockers | generic geometry/structure | yes | barriers and minimum-score controls |
 | Nested assets | Change emission | containment in a figure/table | generic geometry | yes | recovered into hierarchy resolution |
 | Side margins | Exclude furniture | narrow outer-margin geometry | generic geometry | yes | text/type constraints |

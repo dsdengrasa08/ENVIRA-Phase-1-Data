@@ -4,6 +4,7 @@ from envira_pdf_layout.config import (
     CaptionAssociationConfig,
     ContainmentConfig,
     DocumentConfig,
+    HeaderFilterConfig,
     OverlapResolutionConfig,
     PipelineConfig,
     TableContextConfig,
@@ -174,6 +175,26 @@ def test_invalid_caption_association_controls_are_rejected():
         PipelineConfig(
             caption_association=CaptionAssociationConfig(ambiguity_margin=-0.1)
         ).validate()
+
+
+def test_invalid_header_roi_ocr_controls_are_rejected():
+    with pytest.raises(ValueError, match="roi_ocr_dpi"):
+        PipelineConfig(headers=HeaderFilterConfig(roi_ocr_dpi=71)).validate()
+    with pytest.raises(ValueError, match="roi_ocr_language"):
+        PipelineConfig(headers=HeaderFilterConfig(roi_ocr_language=" ")).validate()
+
+
+def test_legacy_header_roi_ocr_environment_maps_to_typed_config():
+    config = PipelineConfig.load(
+        environ={
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_FALLBACK": "0",
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_DPI": "240",
+            "PHASE1_LATER_PAGE_HEADER_PDF_ROI_OCR_LANGUAGE": "deu",
+        }
+    )
+    assert not config.headers.roi_ocr_fallback
+    assert config.headers.roi_ocr_dpi == 240
+    assert config.headers.roi_ocr_language == "deu"
 
 
 def test_default_profile_loads_caption_association_controls():
