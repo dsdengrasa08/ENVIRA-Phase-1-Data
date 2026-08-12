@@ -20,12 +20,38 @@ def raw_label_counts_dataframe(regions):
 
 
 def regions_dataframe(run):
+    """Compatibility view of core-filtered regions; prefer explicit hierarchy views."""
     return pd.DataFrame(run.final_regions)
 
 
 def resolved_regions_dataframe(run):
     """Return duplicate-resolved regions without hiding authoritative regions."""
     return pd.DataFrame(run.resolved_regions)
+
+
+def top_level_regions_dataframe(run):
+    """Return the hierarchy-resolved linear reading stream."""
+    return pd.DataFrame(run.top_level_regions)
+
+
+def nested_regions_dataframe(run):
+    """Return accepted children with parent-local order."""
+    return pd.DataFrame(run.nested_regions)
+
+
+def hierarchy_counts_dataframe(run):
+    """Return physical/top-level/nested counts for consistency inspection."""
+    return pd.DataFrame(
+        [
+            {
+                "physical_regions": len(run.physical_regions),
+                "top_level_regions": len(run.top_level_regions),
+                "nested_regions": len(run.nested_regions),
+                "partition_valid": len(run.physical_regions)
+                == len(run.top_level_regions) + len(run.nested_regions),
+            }
+        ]
+    )
 
 
 def layout_relationships_dataframe(run):

@@ -73,3 +73,11 @@ def overlap_resolution_diagnostics(run, page_number=None):
         if page_number is None or relationship["page_number"] == page_number
     ]
     return pd.DataFrame(rows)
+
+
+def nested_hierarchy_diagnostics(run, page_number=None):
+    """Return accepted and ambiguous non-destructive containment decisions."""
+    rows = run.diagnostics.get("nested_hierarchy", {}).get("decisions", [])
+    if page_number is not None:
+        rows = [row for row in rows if row.get("page_number") == page_number]
+    return pd.DataFrame(rows)

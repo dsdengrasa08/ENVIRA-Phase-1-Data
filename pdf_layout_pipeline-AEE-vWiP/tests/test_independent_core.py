@@ -16,6 +16,27 @@ def test_production_pipeline_uses_package_owned_core():
     assert "run_authoritative_pipeline" not in source
 
 
+def test_production_core_uses_extracted_region_conversion_stage():
+    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    assert "from .region_conversion import convert_docling_document" in source
+    assert "conversion_result = convert_docling_document(" in source
+    assert "def docling_item_to_regions" not in source
+    assert "def iter_docling_items" not in source
+
+
+def test_pipeline_has_no_remove_then_recover_nested_asset_path():
+    source = (PACKAGE / "pipeline.py").read_text(encoding="utf-8")
+    assert "recovered_for_hierarchy" not in source
+    assert 'excluded_by_stage.get("nested_assets"' not in source
+    assert "resolve_nested_hierarchy" in source
+
+
+def test_core_nested_asset_stage_is_non_destructive():
+    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    assert 'analysis["authoritative_mode"] = "non_destructive_proposals"' in source
+    assert "return kept, [], analysis" in source
+
+
 def test_runtime_modules_do_not_load_or_execute_a_notebook():
     for filename in ("pipeline.py", "authoritative.py", "independent_core.py"):
         source = (PACKAGE / filename).read_text(encoding="utf-8")
