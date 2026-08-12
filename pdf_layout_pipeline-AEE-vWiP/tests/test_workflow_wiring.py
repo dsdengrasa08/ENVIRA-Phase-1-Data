@@ -16,6 +16,8 @@ def test_workflow_loads_the_aee_package_not_an_old_pipeline_directory():
     assert "pdf_layout_pipeline-AEE-vWiP/requirements.txt" in source
     assert 'repo_dir / "pdf_layout_pipeline-AEE-vWiP"' in source
     assert 'PROJECT_DIR.name != "pdf_layout_pipeline-AEE-vWiP"' in source
+    assert 'CONFIG_PROFILE = PROJECT_DIR / "config" / "default.yaml"' in source
+    assert "PipelineConfig.load(" in source
 
 
 def test_workflow_displays_resolved_caption_outputs():
@@ -29,3 +31,7 @@ def test_workflow_displays_resolved_caption_outputs():
     assert "suppressed_regions_dataframe" in source
     assert "render_overlap_resolution_overlay" in source
     assert "overlap_resolution_diagnostics" in source
+    assert "render_figure_completion_overlay" in source
+    assert "figure_completion_geometry_summary_dataframe" in source
+    assert "stage_trace_dataframe" in source
+    assert "stage_trace_diagnostics" in source
