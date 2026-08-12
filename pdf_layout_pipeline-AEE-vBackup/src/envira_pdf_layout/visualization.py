@@ -22,6 +22,8 @@ _COLORS = {
     "Table": (0, 140, 255),
     "Formula": (0, 255, 255),
     "Caption": (180, 0, 180),
+    "Figure Caption": (180, 0, 180),
+    "Table Caption": (180, 80, 0),
     "Footnote": (120, 120, 0),
     "Reference": (80, 180, 80),
     "Page-header": (120, 120, 120),
