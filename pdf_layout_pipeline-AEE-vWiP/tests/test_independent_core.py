@@ -6,6 +6,7 @@ import envira_pdf_layout.pipeline as pipeline
 
 
 PACKAGE = Path(__file__).parents[1] / "src" / "envira_pdf_layout"
+PROJECT = Path(__file__).parents[1]
 
 
 def test_production_pipeline_uses_package_owned_core():
@@ -22,6 +23,25 @@ def test_runtime_modules_do_not_load_or_execute_a_notebook():
         assert "_REFERENCE_CELLS" not in source
         assert "reference-cell-" not in source
         assert "exec(" not in source
+
+
+def test_project_has_no_source_notebook_dependency():
+    forbidden = ("source_pdf_" + "layoutparser", "pdf_layoutparser_" + "vF.ipynb")
+    text_files = [
+        path
+        for path in PROJECT.rglob("*")
+        if path.is_file()
+        and ".git" not in path.parts
+        and "__pycache__" not in path.parts
+        and path.suffix in {".py", ".md", ".yaml", ".yml", ".ipynb", ".txt"}
+    ]
+    references = {
+        str(path.relative_to(PROJECT)): token
+        for path in text_files
+        for token in forbidden
+        if token in path.read_text(encoding="utf-8")
+    }
+    assert references == {}
 
 
 def test_compatibility_entry_point_delegates_to_independent_core(monkeypatch):

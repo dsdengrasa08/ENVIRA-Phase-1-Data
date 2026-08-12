@@ -1,18 +1,17 @@
 # ENVIRA modular PDF layout pipeline
 
-This directory is the maintained, independent package-backed PDF layout pipeline.
-The historical `pdf_layoutparser_vF.ipynb` remains unchanged for provenance and
-regression review, but it is not read, imported, or executed by the production
-workflow. The workflow preserves visible, stage-by-stage inspection while the
-complete active processing implementation lives in `src/envira_pdf_layout`.
+This directory is the maintained, self-contained PDF layout pipeline. The workflow
+preserves visible, stage-by-stage inspection while the complete active processing
+implementation and its tests live inside this directory. No file outside this
+directory is required to import, test, or run the pipeline.
 
 ## Run
 
 ### Colab
 
 Open `pdf_layout_pipeline_workflow.ipynb`, set `SOURCE_PDF`, run the optional
-installation cell, and execute top to bottom. Google Drive and model paths retain
-the `PHASE1_*` environment-variable overrides used by the reference notebook.
+installation cell, and execute top to bottom. Google Drive and model paths support
+the documented `PHASE1_*` environment-variable overrides.
 
 ### Local/server
 
