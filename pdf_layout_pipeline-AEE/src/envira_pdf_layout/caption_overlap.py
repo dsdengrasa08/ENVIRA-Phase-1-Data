@@ -376,18 +376,34 @@ def resolve_caption_overlaps(
     return output, relationships, suppressed
 
 
+def _relationship_pair(relationship):
+    """Return the region-ID pair from a geometric or association relationship."""
+    left = relationship.get("left_region_id")
+    right = relationship.get("right_region_id")
+    if left is None or right is None:
+        left = relationship.get("child_region_id")
+        right = relationship.get("parent_region_id")
+    if left is None or right is None:
+        return None
+    return frozenset((str(left), str(right)))
+
+
 def build_caption_groups(regions, logical_tables, relationships, pages, config=None):
     """Create table-aware and standalone semantic caption groups."""
     config = config or CaptionOverlapConfig()
     by_id = {str(region["layout_region_id"]): region for region in regions}
     relation_by_pair = {
-        frozenset((r["left_region_id"], r["right_region_id"])): r for r in relationships
+        pair: relationship
+        for relationship in relationships
+        if (pair := _relationship_pair(relationship)) is not None
     }
     page_map = {int(page["page_number"]): page for page in pages}
     groups = []
     for table in logical_tables:
-        identifier_ids = list(dict.fromkeys(table.get("identifier_region_ids", [])))
-        caption_ids = list(dict.fromkeys(table.get("caption_region_ids", [])))
+        identifier_ids = list(
+            dict.fromkeys(map(str, table.get("identifier_region_ids", [])))
+        )
+        caption_ids = list(dict.fromkeys(map(str, table.get("caption_region_ids", []))))
         member_ids = list(dict.fromkeys(identifier_ids + caption_ids))
         group_relations = []
         for i, left in enumerate(member_ids):
