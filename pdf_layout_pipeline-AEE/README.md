@@ -27,18 +27,21 @@ The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the
 asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 
+## Configuration precedence
+
+The notebook loads `config/default.yaml`, then the Colab profile when applicable, then applies `PHASE1_*` environment variables and explicit notebook arguments. Unknown YAML keys fail fast. Selective caption OCR is disabled by default; configure `caption_ocr.provider` with a `package.module:callable` adapter to enable OCR or GLM-backed line extraction.
+
+The source `pdf_layoutparser_vF.ipynb` is regression reference material only. Production code neither imports nor executes it.
+
 ## Package map
 
 - `config.py`: immutable grouped run configuration and environment parsing.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `authoritative.py`: fidelity adapter that executes the immutable reference
-  notebook's item conversion, page-1 recovery, filters, asset recovery, and
-  reading-order implementation in an isolated namespace.
-- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: legacy
-  independently testable helpers retained for compatibility; the maintained
-  workflow does not substitute them for the authoritative algorithms.
+- `modular_pipeline.py`: package-native conversion, order-sensitive filtering, asset recovery, and reading-order orchestration.
+- `filtering/`, `assets/`, `region_conversion.py`, `reading_order.py`: production stage implementations called by the modular orchestrator.
+- `ocr.py`: optional provider boundary for selective caption-line OCR, including externally supplied GLM adapters.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.
@@ -54,8 +57,8 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 
 ## Generalized overlap resolution
 
-The maintained pipeline now resolves overlaps after the authoritative filters and
-before semantic context grouping. Regions removed by the authoritative nested-
+The maintained pipeline now resolves overlaps after the package-native filters and
+before semantic context grouping. Regions removed by the filtered nested-
 asset filter are conservatively restored to the relationship layer as nested
 children, so their text and geometry remain auditable without forcing them into
 the top-level reading stream.
@@ -80,7 +83,7 @@ unresolved conflicts.
 
 ## Logical table context
 
-After the authoritative filters and reading-order assignment, the package creates
+After the package-native filters and reading-order assignment, the package creates
 one logical group for every retained table. Groups reference existing region IDs;
 they do not reclassify regions or enlarge the physical table-body bounding box.
 Association combines normalized geometry, column compatibility, reading order,
@@ -144,7 +147,7 @@ rules.
 Overlap handling is deliberately separate from physical layout filtering. Despite
 the compatibility module name, intersecting regions of every semantic class are
 analyzed; caption and table relationships receive additional role-aware grouping.
-The pipeline preserves `raw_regions` and authoritative `final_regions`, then creates
+The pipeline preserves `raw_regions` and filtered `final_regions`, then creates
 `resolved_regions` by collapsing only near-identical, role-compatible detections
 with compatible text evidence. Nested identifiers, complementary caption fragments,
 caption/table boundary overlaps, and ambiguous pairs remain available. Pairwise
@@ -158,7 +161,7 @@ precedence over a geometric nesting label.
 Duplicate edges are resolved as connected components so three-way and chained
 detections select one deterministic canonical item. Resolved regions retain source
 IDs, an emission policy for canonical versus nested-child content, and a contiguous
-resolved reading order; raw and authoritative reading order remain unchanged.
+resolved reading order; raw and filtered reading order remain unchanged.
 
 Table-context association runs on the conservatively resolved regions. A subsequent
 context-aware pass creates `caption_groups`, preserving identifier and fragment
@@ -171,7 +174,7 @@ The consumer-facing group is typed as `Table Caption`, carries the union bbox, a
 contains ordered child descriptors with derived identifier/fragment roles, source
 types, source boxes, and detector scores. Source detections are not reclassified or
 resized.
-The physical table bbox is never resized. Outputs include raw, authoritative,
+The physical table bbox is never resized. Outputs include raw, filtered,
 resolved, relationship, caption-group, and logical-table JSONL artifacts. Raw,
 resolved, table-context, and caption-relationship visualization functions remain
 separate so model and post-processing behavior can be inspected independently.

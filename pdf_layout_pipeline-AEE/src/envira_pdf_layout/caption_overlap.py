@@ -1,6 +1,6 @@
 """Conservative overlap analysis for caption-related layout regions.
 
-Raw and authoritative regions are never mutated.  This module collapses only
+Raw and filtered regions are never mutated.  This module collapses only
 clear duplicates and otherwise records relationships for context-aware grouping.
 """
 
@@ -377,7 +377,7 @@ def resolve_caption_overlaps(
 
 
 def build_caption_groups(regions, logical_tables, relationships, pages, config=None):
-    """Create role-aware caption groups after table-context association."""
+    """Create table-aware and standalone semantic caption groups."""
     config = config or CaptionOverlapConfig()
     by_id = {str(region["layout_region_id"]): region for region in regions}
     relation_by_pair = {
@@ -531,6 +531,52 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                     if any(r["kind"] == "AMBIGUOUS" for r in group_relations)
                     else "resolved"
                 ),
+            }
+        )
+    grouped = {
+        str(region_id)
+        for group in groups
+        for region_id in group["ordered_source_region_ids"]
+    }
+    parent_by_child = {
+        str(relation.get("child_region_id")): str(relation.get("parent_region_id"))
+        for relation in relationships
+        if relation.get("child_region_id") and relation.get("parent_region_id")
+    }
+    for region in regions:
+        region_id = str(region["layout_region_id"])
+        if region.get("type") != "Caption" or region_id in grouped:
+            continue
+        parent_id = parent_by_child.get(region_id)
+        parent = by_id.get(parent_id) if parent_id else None
+        groups.append(
+            {
+                "resolved_region_id": f"{region_id}:caption",
+                "page_number": region["page_number"],
+                "parent_table_id": None,
+                "parent_table_region_id": None,
+                "parent_region_id": parent_id,
+                "role": f"{str((parent or {}).get('type', 'unattached')).lower()}_caption",
+                "type": "Caption",
+                "bbox_px": list(region["bbox_px"]),
+                "identifier_region_ids": [],
+                "caption_fragment_region_ids": [region_id],
+                "ordered_source_region_ids": [region_id],
+                "semantic_text_region_ids": [region_id],
+                "text": _text(region),
+                "source_region_ids": region.get("source_region_ids", [region_id]),
+                "children": [
+                    {
+                        "region_id": region_id,
+                        "semantic_role": "caption_fragment",
+                        "source_type": region.get("type"),
+                        "source_bbox_px": list(region["bbox_px"]),
+                        "detector_score": region.get("score"),
+                    }
+                ],
+                "relationships": [],
+                "resolution": "standalone_caption_group",
+                "status": "resolved" if parent_id else "unattached",
             }
         )
     return groups

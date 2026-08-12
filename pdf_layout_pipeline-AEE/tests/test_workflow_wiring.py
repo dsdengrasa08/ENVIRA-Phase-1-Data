@@ -13,7 +13,7 @@ def _workflow_source():
 
 def test_workflow_loads_the_aee_package_not_an_old_pipeline_directory():
     source = _workflow_source()
-    assert "pdf_layout_pipeline-AEE/requirements.txt" in source
+    assert "REPO_DIR / 'pdf_layout_pipeline-AEE'" in source
     assert 'repo_dir / "pdf_layout_pipeline-AEE"' in source
     assert 'PROJECT_DIR.name != "pdf_layout_pipeline-AEE"' in source
 
@@ -29,3 +29,9 @@ def test_workflow_displays_resolved_caption_outputs():
     assert "suppressed_regions_dataframe" in source
     assert "render_overlap_resolution_overlay" in source
     assert "overlap_resolution_diagnostics" in source
+    assert "render_raw_detection_overlays" in source
+    assert "render_table_context_overlay" in source
+    assert "table_context_diagnostics" in source
+    assert "caption_overlap_diagnostics" in source
+    assert "create_caption_line_provider" in source
+    assert "CONFIG_PROFILES" in source

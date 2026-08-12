@@ -24,7 +24,7 @@ def regions_dataframe(run):
 
 
 def resolved_regions_dataframe(run):
-    """Return duplicate-resolved regions without hiding authoritative regions."""
+    """Return duplicate-resolved regions without hiding filtered regions."""
     return pd.DataFrame(run.resolved_regions)
 
 

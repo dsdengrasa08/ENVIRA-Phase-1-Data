@@ -18,6 +18,25 @@ def test_env_config(monkeypatch, tmp_path):
     assert config.exclude_labels == {"picture", "chart"}
 
 
+def test_yaml_profiles_then_environment_overrides(monkeypatch, tmp_path):
+    defaults = tmp_path / "defaults.yaml"
+    profile = tmp_path / "profile.yaml"
+    defaults.write_text("document:\n  render_dpi: 144\nheaders:\n  enabled: false\n")
+    profile.write_text("document:\n  page_start: 3\n")
+    monkeypatch.setenv("PHASE1_PAGE_START", "4")
+    config = PipelineConfig.from_env(profiles=(defaults, profile))
+    assert config.document.render_dpi == 144
+    assert config.document.page_start == 4
+    assert config.headers.enabled is False
+
+
+def test_yaml_rejects_unknown_keys(tmp_path):
+    path = tmp_path / "bad.yaml"
+    path.write_text("document:\n  misspelled_option: true\n")
+    with pytest.raises(ValueError, match="misspelled_option"):
+        PipelineConfig.from_yaml(path)
+
+
 def test_invalid_range():
     with pytest.raises(ValueError):
         PipelineConfig(document=DocumentConfig(page_start=3, page_end=2)).validate()

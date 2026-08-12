@@ -14,40 +14,39 @@ def _write_jsonl(path, rows):
 
 def export_pipeline_result(run):
     paths = run.document.artifacts
-    paths.raw_json.write_text(
-        json.dumps(run.raw_document, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
-    paths.raw_markdown.write_text(run.raw_markdown, encoding="utf-8")
-    _write_jsonl(paths.page_records_jsonl, run.pages)
-    _write_jsonl(paths.regions_jsonl, run.final_regions)
-    _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
-    _write_jsonl(paths.resolved_regions_jsonl, run.resolved_regions)
-    _write_jsonl(paths.caption_relationships_jsonl, run.caption_overlap_relationships)
-    _write_jsonl(paths.caption_groups_jsonl, run.caption_groups)
-    _write_jsonl(paths.layout_relationships_jsonl, run.layout_relationships)
-    _write_jsonl(paths.resolution_decisions_jsonl, run.resolution_decisions)
-    _write_jsonl(paths.suppressed_regions_jsonl, run.suppressed_regions)
-    _write_jsonl(paths.post_body_assets_jsonl, run.post_body_assets)
-    _write_jsonl(paths.post_body_asset_regions_jsonl, run.post_body_asset_regions)
-    _write_jsonl(paths.logical_tables_jsonl, run.logical_tables)
-    summary_dataframe(run).to_csv(paths.summary_csv, index=False)
-    return ExportManifest(
-        (
-            paths.raw_json,
-            paths.raw_markdown,
-            paths.page_records_jsonl,
-            paths.regions_jsonl,
-            paths.post_body_assets_jsonl,
-            paths.post_body_asset_regions_jsonl,
-            paths.logical_tables_jsonl,
-            paths.raw_regions_jsonl,
-            paths.resolved_regions_jsonl,
-            paths.caption_relationships_jsonl,
-            paths.caption_groups_jsonl,
-            paths.layout_relationships_jsonl,
-            paths.resolution_decisions_jsonl,
-            paths.suppressed_regions_jsonl,
-            paths.summary_csv,
+    config = getattr(run, "config", None)
+    options = getattr(config, "export", None)
+    write_raw = True if options is None else options.write_raw
+    write_regions = True if options is None else options.write_regions
+    write_overlays = True if options is None else options.write_overlays
+    files = []
+    if write_raw:
+        paths.raw_json.write_text(
+            json.dumps(run.raw_document, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
         )
-    )
+        paths.raw_markdown.write_text(run.raw_markdown, encoding="utf-8")
+        _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
+        files.extend((paths.raw_json, paths.raw_markdown, paths.raw_regions_jsonl))
+    _write_jsonl(paths.page_records_jsonl, run.pages)
+    files.append(paths.page_records_jsonl)
+    if write_regions:
+        for path, rows in (
+            (paths.regions_jsonl, run.final_regions),
+            (paths.resolved_regions_jsonl, run.resolved_regions),
+            (paths.caption_relationships_jsonl, run.caption_overlap_relationships),
+            (paths.caption_groups_jsonl, run.caption_groups),
+            (paths.layout_relationships_jsonl, run.layout_relationships),
+            (paths.resolution_decisions_jsonl, run.resolution_decisions),
+            (paths.suppressed_regions_jsonl, run.suppressed_regions),
+            (paths.post_body_assets_jsonl, run.post_body_assets),
+            (paths.post_body_asset_regions_jsonl, run.post_body_asset_regions),
+            (paths.logical_tables_jsonl, run.logical_tables),
+        ):
+            _write_jsonl(path, rows)
+            files.append(path)
+    summary_dataframe(run).to_csv(paths.summary_csv, index=False)
+    files.append(paths.summary_csv)
+    if write_overlays:
+        files.extend(sorted(paths.overlay_dir.glob("*.png")))
+    return ExportManifest(tuple(files))
