@@ -12,11 +12,22 @@ import yaml
 
 def _serializable(value: Any) -> Any:
     if is_dataclass(value):
-        return {item.name: _serializable(getattr(value, item.name)) for item in fields(value)}
+        return {
+            item.name: _serializable(getattr(value, item.name))
+            for item in fields(value)
+        }
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, (tuple, frozenset, set)):
-        return [_serializable(item) for item in sorted(value) if isinstance(value, (set, frozenset))] if isinstance(value, (set, frozenset)) else [_serializable(item) for item in value]
+        return (
+            [
+                _serializable(item)
+                for item in sorted(value)
+                if isinstance(value, (set, frozenset))
+            ]
+            if isinstance(value, (set, frozenset))
+            else [_serializable(item) for item in value]
+        )
     if isinstance(value, dict):
         return {str(key): _serializable(item) for key, item in sorted(value.items())}
     return value
@@ -54,9 +65,16 @@ def _build_section(section: str, cls: type, values: Mapping[str, Any]) -> Any:
     allowed = {item.name for item in fields(cls)}
     unknown = set(values) - allowed
     if unknown:
-        raise ValueError(f"Unknown configuration field(s) in {section}: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown configuration field(s) in {section}: {', '.join(sorted(unknown))}"
+        )
     hints = get_type_hints(cls)
-    return cls(**{key: _convert(value, hints[key], f"{section}.{key}") for key, value in values.items()})
+    return cls(
+        **{
+            key: _convert(value, hints[key], f"{section}.{key}")
+            for key, value in values.items()
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -204,6 +222,32 @@ class ExportConfig:
 
 
 @dataclass(frozen=True)
+class HeuristicProfileConfig:
+    """Optional lexical profiles; generic geometry remains authoritative."""
+
+    publisher_profiles: tuple[str, ...] = (
+        "elsevier_sciencedirect",
+        "generic_academic_publishers",
+    )
+    publisher_mode: str = "confirmatory"
+    document_family: str = "auto"
+    language: str = "auto"
+
+
+@dataclass(frozen=True)
+class ContentPolicyConfig:
+    """Consumer policy for valid semantic sections, separate from layout noise."""
+
+    retain_front_matter: bool = False
+    retain_references: bool = False
+    retain_acknowledgements: bool = False
+    retain_declarations: bool = False
+    retain_appendices: bool = False
+    retain_supplementary_sections: bool = False
+    preserve_excluded_sections_in_secondary_stream: bool = True
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     document: DocumentConfig = field(default_factory=DocumentConfig)
@@ -220,6 +264,8 @@ class PipelineConfig:
         default_factory=OverlapResolutionConfig
     )
     export: ExportConfig = field(default_factory=ExportConfig)
+    heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
+    content_policy: ContentPolicyConfig = field(default_factory=ContentPolicyConfig)
     exclude_labels: frozenset[str] = frozenset()
     profile_path: Path | None = field(default=None, compare=False)
     value_sources: dict[str, str] = field(default_factory=dict, compare=False)
@@ -250,6 +296,8 @@ class PipelineConfig:
             "caption_overlap": CaptionOverlapConfig,
             "overlap_resolution": OverlapResolutionConfig,
             "export": ExportConfig,
+            "heuristics": HeuristicProfileConfig,
+            "content_policy": ContentPolicyConfig,
         }
         data: dict[str, Any] = {}
         sources: dict[str, str] = {
@@ -265,12 +313,16 @@ class PipelineConfig:
                 raise ValueError("Configuration profile must contain a mapping")
             unknown = set(loaded) - set(sections) - {"exclude_labels"}
             if unknown:
-                raise ValueError(f"Unknown configuration section(s): {', '.join(sorted(unknown))}")
+                raise ValueError(
+                    f"Unknown configuration section(s): {', '.join(sorted(unknown))}"
+                )
             for key, value in loaded.items():
                 if key not in sections:
                     continue
                 if value is not None and not isinstance(value, Mapping):
-                    raise ValueError(f"Configuration section {key} must contain a mapping")
+                    raise ValueError(
+                        f"Configuration section {key} must contain a mapping"
+                    )
                 data[key] = dict(value or {})
             if "exclude_labels" in loaded:
                 data["exclude_labels"] = loaded["exclude_labels"]
@@ -295,11 +347,17 @@ class PipelineConfig:
             "PHASE1_USE_LOCAL_DOCLING_ARTIFACTS": ("docling", "use_local_artifacts"),
             "PHASE1_REQUIRE_SAVED_DOCLING_MODELS": ("docling", "require_saved_models"),
             "PHASE1_AUTO_DOWNLOAD_DOCLING_MODELS": ("docling", "auto_download_models"),
-            "PHASE1_FORCE_REDOWNLOAD_DOCLING_MODELS": ("docling", "force_redownload_models"),
+            "PHASE1_FORCE_REDOWNLOAD_DOCLING_MODELS": (
+                "docling",
+                "force_redownload_models",
+            ),
             "PHASE1_DOCLING_MIN_MODEL_SIZE_MB": ("docling", "min_model_size_mb"),
             "PHASE1_DOCLING_DO_OCR": ("docling", "do_ocr"),
             "PHASE1_DOCLING_DO_TABLE_STRUCTURE": ("docling", "do_table_structure"),
-            "PHASE1_DOCLING_DO_FORMULA_ENRICHMENT": ("docling", "do_formula_enrichment"),
+            "PHASE1_DOCLING_DO_FORMULA_ENRICHMENT": (
+                "docling",
+                "do_formula_enrichment",
+            ),
             "PHASE1_DOCLING_DO_CODE_ENRICHMENT": ("docling", "do_code_enrichment"),
             "PHASE1_DOCLING_CODE_FORMULA_PRESET": ("docling", "code_formula_preset"),
         }
@@ -319,36 +377,65 @@ class PipelineConfig:
                 sources[f"{section}.{key}"] = f"environment:{name}"
         if "PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES" in env:
             data.setdefault("page1", {})["abstract_aliases"] = [
-                item.strip() for item in env["PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES"].split(",") if item.strip()
+                item.strip()
+                for item in env["PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES"].split(",")
+                if item.strip()
             ]
-            sources["page1.abstract_aliases"] = "environment:PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES"
+            sources["page1.abstract_aliases"] = (
+                "environment:PHASE1_PAGE1_ABSTRACT_EQUIVALENT_ALIASES"
+            )
         if "PHASE1_DOCLING_EXCLUDE_LABELS" in env:
-            data["exclude_labels"] = [item.strip() for item in env["PHASE1_DOCLING_EXCLUDE_LABELS"].split(",") if item.strip()]
+            data["exclude_labels"] = [
+                item.strip()
+                for item in env["PHASE1_DOCLING_EXCLUDE_LABELS"].split(",")
+                if item.strip()
+            ]
             sources["exclude_labels"] = "environment:PHASE1_DOCLING_EXCLUDE_LABELS"
 
-        document_overrides = {key: overrides.pop(key) for key in list(overrides) if key in {item.name for item in fields(DocumentConfig)}}
+        document_overrides = {
+            key: overrides.pop(key)
+            for key in list(overrides)
+            if key in {item.name for item in fields(DocumentConfig)}
+        }
         if source_pdf is not None:
             document_overrides["source_pdf"] = source_pdf
         if document_overrides:
             data.setdefault("document", {}).update(document_overrides)
-            sources.update({f"document.{key}": "explicit" for key in document_overrides})
+            sources.update(
+                {f"document.{key}": "explicit" for key in document_overrides}
+            )
         for section, values in overrides.items():
             if section not in sections or not isinstance(values, Mapping):
-                raise ValueError(f"Unknown or invalid explicit configuration override: {section}")
+                raise ValueError(
+                    f"Unknown or invalid explicit configuration override: {section}"
+                )
             data.setdefault(section, {}).update(values)
             sources.update({f"{section}.{key}": "explicit" for key in values})
 
-        built = {section: _build_section(section, section_cls, data.get(section, {})) for section, section_cls in sections.items()}
+        built = {
+            section: _build_section(section, section_cls, data.get(section, {}))
+            for section, section_cls in sections.items()
+        }
         if built["docling"].artifacts_dir is None:
             built["docling"] = replace(
                 built["docling"],
-                artifacts_dir=built["runtime"].project_dir / "artifacts" / "docling_models",
+                artifacts_dir=built["runtime"].project_dir
+                / "artifacts"
+                / "docling_models",
             )
             if sources["docling.artifacts_dir"] == "default":
                 sources["docling.artifacts_dir"] = "derived:runtime.project_dir"
-        excluded = frozenset(str(item).lower() for item in data.get("exclude_labels", []))
+        excluded = frozenset(
+            str(item).lower() for item in data.get("exclude_labels", [])
+        )
         legacy = {key: value for key, value in env.items() if key.startswith("PHASE1_")}
-        config = cls(**built, exclude_labels=excluded, profile_path=profile_path, value_sources=sources, legacy_core_environment=legacy)
+        config = cls(
+            **built,
+            exclude_labels=excluded,
+            profile_path=profile_path,
+            value_sources=sources,
+            legacy_core_environment=legacy,
+        )
         config.validate()
         return config
 
@@ -388,20 +475,41 @@ class PipelineConfig:
             section = getattr(self, section_name)
             for item in fields(section):
                 value = getattr(section, item.name)
-                if isinstance(value, (int, float)) and not isinstance(value, bool) and (
-                    item.name.endswith("_ratio")
-                    or item.name.endswith("_min_y")
-                    or item.name.endswith("_max_y")
-                    or item.name.endswith("_y_min")
-                    or item.name.endswith("_y_max")
-                    or item.name.endswith("_y0_min")
-                    or item.name.endswith("_y1_max")
-                ) and not 0 <= value <= 1:
+                if (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and (
+                        item.name.endswith("_ratio")
+                        or item.name.endswith("_min_y")
+                        or item.name.endswith("_max_y")
+                        or item.name.endswith("_y_min")
+                        or item.name.endswith("_y_max")
+                        or item.name.endswith("_y0_min")
+                        or item.name.endswith("_y1_max")
+                    )
+                    and not 0 <= value <= 1
+                ):
                     raise ValueError(f"{section_name}.{item.name} must be in [0, 1]")
         if self.page1.title_y_min > self.page1.title_y_max:
             raise ValueError("page1 title_y_min must not exceed title_y_max")
         if self.headers.min_repeat_pages < 1 or self.footer.min_repeat_pages < 1:
             raise ValueError("repeat-page thresholds must be positive")
+        if self.heuristics.publisher_mode not in {
+            "disabled",
+            "evidence_only",
+            "confirmatory",
+            "active",
+        }:
+            raise ValueError("heuristics.publisher_mode is invalid")
+        from .heuristics import PUBLISHER_PROFILES
+
+        unknown_profiles = set(self.heuristics.publisher_profiles) - set(
+            PUBLISHER_PROFILES
+        )
+        if unknown_profiles:
+            raise ValueError(
+                "Unknown publisher profile(s): " + ", ".join(sorted(unknown_profiles))
+            )
         if not 0 < self.table_context.max_vertical_gap_page_ratio <= 1:
             raise ValueError("table context vertical gap ratio must be in (0, 1]")
         if not 0 <= self.table_context.min_horizontal_overlap_ratio <= 1:

@@ -23,6 +23,10 @@ def export_pipeline_result(run):
         json.dumps(run.diagnostics.get("effective_config", {}), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    paths.diagnostics_json.write_text(
+        json.dumps(run.diagnostics, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     _write_jsonl(paths.page_records_jsonl, run.pages)
     _write_jsonl(paths.regions_jsonl, run.final_regions)
     _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
@@ -41,6 +45,7 @@ def export_pipeline_result(run):
             paths.raw_json,
             paths.raw_markdown,
             paths.effective_config_json,
+            paths.diagnostics_json,
             paths.page_records_jsonl,
             paths.regions_jsonl,
             paths.post_body_assets_jsonl,

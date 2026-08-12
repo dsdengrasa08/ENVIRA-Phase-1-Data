@@ -105,7 +105,9 @@ def test_model_artifact_path_is_derived_from_effective_project(tmp_path):
         environ={"PHASE1_PROJECT_DIR": str(tmp_path)}, source_pdf="paper.pdf"
     )
     assert config.docling.artifacts_dir == tmp_path / "artifacts" / "docling_models"
-    assert config.value_sources["docling.artifacts_dir"] == "derived:runtime.project_dir"
+    assert (
+        config.value_sources["docling.artifacts_dir"] == "derived:runtime.project_dir"
+    )
 
 
 def test_invalid_range():
@@ -136,3 +138,18 @@ def test_invalid_generalized_overlap_ratio():
         PipelineConfig(
             overlap_resolution=OverlapResolutionConfig(duplicate_iou=1.1)
         ).validate()
+
+
+def test_default_profile_uses_confirmatory_heuristics_and_auditable_policy():
+    profile = Path(__file__).parents[1] / "config" / "default.yaml"
+    config = PipelineConfig.load(profile, environ={})
+    assert config.heuristics.publisher_mode == "confirmatory"
+    assert config.heuristics.document_family == "auto"
+    assert config.content_policy.preserve_excluded_sections_in_secondary_stream
+
+
+def test_unknown_publisher_profile_is_rejected():
+    with pytest.raises(ValueError, match="Unknown publisher profile"):
+        PipelineConfig.load(
+            environ={}, heuristics={"publisher_profiles": ["one_document_hack"]}
+        )

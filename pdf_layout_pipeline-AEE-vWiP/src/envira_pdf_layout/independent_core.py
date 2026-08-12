@@ -13,6 +13,13 @@ import os
 from pathlib import Path
 from typing import Any, Iterator
 
+from .content_policy import apply_content_policy
+from .heuristics import (
+    classify_document_family,
+    page1_publisher_decision,
+    publisher_matches,
+    publisher_tokens,
+)
 from .region_conversion import convert_docling_document
 from .types import PipelineResult
 
@@ -1874,6 +1881,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             page_start=PAGE_START,
         )
         raw_regions = conversion_result.regions
+        document_family = classify_document_family(raw_regions)
+        if config.heuristics.document_family != "auto":
+            document_family = {
+                **document_family,
+                "family": config.heuristics.document_family,
+                "configured": True,
+            }
         region_conversion_diagnostics = {
             "item_count": conversion_result.item_count,
             "provenance_count": conversion_result.provenance_count,
@@ -1891,12 +1905,6 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
         # =============================================================================
         # Page-1 upper-frontmatter filter helpers
         # =============================================================================
-
-        PAGE1_UPPER_DROP_TEXT_RE = re.compile(
-            r"(contents\s+lists\s+available|science\s*direct|journal\s+homepage|"
-            r"elsevier|check\s+for\s+updates|cross\s*mark|crossmark)",
-            re.IGNORECASE,
-        )
 
         PAGE1_UPPER_DROP_LABELS = {
             "picture",
@@ -2922,7 +2930,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             if label in PAGE1_UPPER_DROP_LABELS:
                 return None
 
-            if PAGE1_UPPER_DROP_TEXT_RE.search(text):
+            if publisher_matches(text, config.heuristics.publisher_profiles):
                 return None
 
             # Standalone labels such as "Review" describe the article category rather
@@ -3247,10 +3255,20 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                     continue
 
                 # Drop known publisher/header/update text.
-                if PAGE1_UPPER_DROP_TEXT_RE.search(text):
-                    region["filter_reason"] = "page1_upper_publisher_or_update_text"
-                    dropped.append(region)
-                    continue
+                publisher_decision = page1_publisher_decision(
+                    text=text,
+                    center_y_ratio=ratios["cy"],
+                    title_bottom_ratio=title_y1,
+                    body_anchor_ratio=anchor_y0,
+                    enabled_profiles=config.heuristics.publisher_profiles,
+                    mode=config.heuristics.publisher_mode,
+                )
+                if publisher_decision.evidence[0].matched:
+                    region["heuristic_decision"] = publisher_decision.to_dict()
+                    if publisher_decision.action == "exclude":
+                        region["filter_reason"] = publisher_decision.reason
+                        dropped.append(region)
+                        continue
 
                 # Main robust rule:
                 # Drop anything between article title bottom and first ARTICLE INFO / ABSTRACT / SUMMARY / Keywords top.
@@ -9633,32 +9651,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
 
 
 
-        COMPACT_FOOTER_PUBLISHER_RE = re.compile(
-            r"\b(?:"
-            r"springer(?:\s+nature)?|"
-            r"elsevier|"
-            r"wiley(?:\s+blackwell)?|"
-            r"taylor\s*(?:&|and)?\s*francis|"
-            r"sage|"
-            r"mdpi|"
-            r"frontiers|"
-            r"nature(?:\s+portfolio)?|"
-            r"biomed\s+central|"
-            r"bmc|"
-            r"oxford\s+university\s+press|"
-            r"cambridge\s+university\s+press"
-            r")\b",
-            re.IGNORECASE,
-        )
-
-
         def _compact_footer_publisher_tokens(text: Any) -> List[str]:
             """Return normalized publisher/imprint tokens found in footer text."""
-            normalized = " ".join(str(text or "").split())
-            return sorted({
-                match.group(0).strip().lower()
-                for match in COMPACT_FOOTER_PUBLISHER_RE.finditer(normalized)
-            })
+            if config.heuristics.publisher_mode in {"disabled", "evidence_only"}:
+                return []
+            return publisher_tokens(
+                str(text or ""), config.heuristics.publisher_profiles
+            )
 
 
         def _compact_footer_region_profile(
@@ -9805,15 +9804,6 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 "aspect_ratio": float(aspect_ratio),
                 "ratios": ratios,
             }
-
-
-        COMPACT_FOOTER_PUBLISHER_WORD_RE = re.compile(
-            r"^(?:"
-            r"springer|elsevier|wiley|blackwell|taylor|francis|sage|mdpi|"
-            r"frontiers|nature|bmc|oxford|cambridge"
-            r")$",
-            re.IGNORECASE,
-        )
 
 
         def _compact_footer_context_bbox(
@@ -9996,9 +9986,7 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
                 )
                 if not normalized_word:
                     continue
-                if not COMPACT_FOOTER_PUBLISHER_WORD_RE.match(
-                    normalized_word
-                ):
+                if not _compact_footer_publisher_tokens(normalized_word):
                     continue
 
                 wx0, wy0, wx1, wy1 = map(float, word[:4])
@@ -14697,6 +14685,24 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             if str(region.get("layout_region_id"))
             not in page1_combined_drop_ids
         ]
+        if config.content_policy.retain_front_matter:
+            restored_front_matter = (
+                page1_upper_excluded_regions
+                + page1_lower_excluded_regions
+                + page1_post_abstract_excluded_regions
+            )
+            filtered_regions.extend(
+                {
+                    **region,
+                    "content_policy_disposition": "retained_front_matter",
+                }
+                for region in restored_front_matter
+            )
+            page1_upper_excluded_regions = []
+            page1_lower_excluded_regions = []
+            page1_post_abstract_excluded_regions = []
+        else:
+            restored_front_matter = []
 
         # Fourth-step cleanup for pages after page 1: remove dynamically detected
         # running headers. The filter combines Docling-region recurrence with an
@@ -14792,6 +14798,13 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
             filtered_regions,
             page_map,
         )
+
+        content_policy_retained, post_conclusion_excluded_regions, content_policy_decisions = apply_content_policy(
+            post_conclusion_excluded_regions,
+            config.content_policy,
+            language=config.heuristics.language,
+        )
+        filtered_regions.extend(content_policy_retained)
 
         (
             post_body_asset_records,
@@ -15462,6 +15475,23 @@ def run_independent_core(conversion, page_set, config) -> PipelineResult:
     }
     diagnostics = {
         "region_conversion": region_conversion_diagnostics,
+        "document_family": document_family,
+        "heuristic_profiles": {
+            "publisher_profiles": list(config.heuristics.publisher_profiles),
+            "publisher_mode": config.heuristics.publisher_mode,
+            "page1_decisions": [
+                region["heuristic_decision"]
+                for region in raw_regions
+                if region.get("heuristic_decision")
+            ],
+        },
+        "content_policy": {
+            "decisions": content_policy_decisions,
+            "retained_region_ids": [r["layout_region_id"] for r in content_policy_retained],
+            "retained_front_matter_region_ids": [
+                r["layout_region_id"] for r in restored_front_matter
+            ],
+        },
         "page1": page1_post_abstract_metadata_analysis,
         "later_headers": later_page_upper_header_analysis,
         "small_edge_figures": small_edge_figure_analysis,

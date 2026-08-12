@@ -186,3 +186,16 @@ and the captured legacy-core environment are written to `effective_config.json`.
 `PipelineConfig.from_env()` remains a compatibility wrapper around the same loader.
 The preserved core executes against the captured configuration snapshot with ambient
 `PHASE1_*` variables isolated for reproducible runs.
+
+## Generalized heuristic policy
+
+Publisher vocabulary is stored in named data profiles rather than embedded in
+destructive filter conditions. The default `confirmatory` mode requires publisher
+lexical evidence to agree with generic page geometry and title/body structure;
+`evidence_only` records matches without changing output. A conservative document-
+family classifier reports its signals and falls back to `unknown`. Evidence,
+document-family signals, and content-policy decisions are exported in
+`pipeline_diagnostics.json`. Consumer choices
+for references, acknowledgements, declarations, appendices, supplementary sections,
+and front matter are configured separately from layout-noise correction. See
+`HEURISTICS.md` for the active destructive-rule inventory and safeguards.
