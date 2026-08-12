@@ -420,84 +420,12 @@ def resolve_layout_overlaps(
 def associate_attachable_context(
     regions, pages, *, ambiguity_margin: float = 0.15
 ) -> list[dict[str, Any]]:
-    """Associate caption-like text with any attachable parent class.
+    """Compatibility wrapper for the authoritative caption-association stage."""
+    from .caption_association import associate_captions
+    from .config import CaptionAssociationConfig
 
-    This intentionally produces semantic edges rather than resizing or
-    reclassifying either source.  Competing parents inside the ambiguity margin
-    remain explicit and unattached.
-    """
-    page_map = {int(page["page_number"]): page for page in pages}
-    by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
-    for region in regions:
-        by_page[int(region["page_number"])].append(region)
-    associations = []
-    for page_number, page_regions in by_page.items():
-        width, height = _page_size(page_map.get(page_number, {}))
-        parents = [r for r in page_regions if class_family(r) in {"asset", "formula"}]
-        candidates = [
-            r
-            for r in page_regions
-            if r.get("type") == "Caption"
-            or re.match(
-                r"^\s*(?:table|fig(?:ure)?\.?|equation|eq\.?|algorithm|listing)\b",
-                _text(r),
-                re.I,
-            )
-        ]
-        for candidate in candidates:
-            cb = list(map(float, candidate["bbox_px"]))
-            alternatives = []
-            for parent in parents:
-                pb = list(map(float, parent["bbox_px"]))
-                horizontal = max(0.0, min(cb[2], pb[2]) - max(cb[0], pb[0])) / max(
-                    1.0, min(cb[2] - cb[0], pb[2] - pb[0])
-                )
-                vertical_gap = max(0.0, max(cb[1], pb[1]) - min(cb[3], pb[3])) / height
-                if horizontal < 0.18 or vertical_gap > 0.10:
-                    continue
-                same_column = candidate.get("reading_order_column") in {
-                    None,
-                    "single",
-                    parent.get("reading_order_column"),
-                } or parent.get("reading_order_column") in {None, "single"}
-                if not same_column:
-                    continue
-                score = (
-                    0.55 * horizontal
-                    + 0.35 * max(0.0, 1.0 - vertical_gap / 0.10)
-                    + 0.10 * (candidate.get("type") == "Caption")
-                )
-                alternatives.append((score, parent))
-            alternatives.sort(key=lambda item: item[0], reverse=True)
-            if not alternatives:
-                continue
-            winner_score, winner = alternatives[0]
-            ambiguous = (
-                len(alternatives) > 1
-                and winner_score - alternatives[1][0] < ambiguity_margin
-            )
-            associations.append(
-                {
-                    "relationship_id": f"p{page_number}:context:{candidate['layout_region_id']}",
-                    "page_number": page_number,
-                    "kind": "CAPTION_OF",
-                    "child_region_id": str(candidate["layout_region_id"]),
-                    "parent_region_id": None
-                    if ambiguous
-                    else str(winner["layout_region_id"]),
-                    "candidate_parent_region_ids": [
-                        str(parent["layout_region_id"]) for _, parent in alternatives
-                    ],
-                    "confidence": round(winner_score, 4),
-                    "ambiguity_margin": round(winner_score - alternatives[1][0], 4)
-                    if len(alternatives) > 1
-                    else None,
-                    "status": "unresolved_conflict" if ambiguous else "associated",
-                    "proposed_action": "flag" if ambiguous else "associate",
-                    "features": {
-                        "page_width": width,
-                        "alternative_count": len(alternatives),
-                    },
-                }
-            )
-    return associations
+    return associate_captions(
+        regions,
+        pages,
+        config=CaptionAssociationConfig(ambiguity_margin=ambiguity_margin),
+    )

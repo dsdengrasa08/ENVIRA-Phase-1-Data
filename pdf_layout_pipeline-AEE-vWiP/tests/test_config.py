@@ -1,6 +1,7 @@
 from pathlib import Path
 import pytest
 from envira_pdf_layout.config import (
+    CaptionAssociationConfig,
     ContainmentConfig,
     DocumentConfig,
     OverlapResolutionConfig,
@@ -166,3 +167,21 @@ def test_invalid_shared_containment_threshold_is_rejected():
         PipelineConfig(
             containment=ContainmentConfig(strong_child_coverage=1.1)
         ).validate()
+
+
+def test_invalid_caption_association_controls_are_rejected():
+    with pytest.raises(ValueError, match="caption association ambiguity_margin"):
+        PipelineConfig(
+            caption_association=CaptionAssociationConfig(ambiguity_margin=-0.1)
+        ).validate()
+
+
+def test_default_profile_loads_caption_association_controls():
+    profile = Path(__file__).parents[1] / "config" / "default.yaml"
+    config = PipelineConfig.load(profile, environ={})
+    assert config.caption_association.enabled
+    assert config.caption_association.acceptance_score == 0.35
+    assert (
+        config.value_sources["caption_association.acceptance_score"]
+        == f"profile:{profile.resolve()}"
+    )

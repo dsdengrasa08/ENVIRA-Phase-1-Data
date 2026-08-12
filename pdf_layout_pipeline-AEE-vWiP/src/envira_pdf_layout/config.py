@@ -201,6 +201,18 @@ class CaptionOverlapConfig:
 
 
 @dataclass(frozen=True)
+class CaptionAssociationConfig:
+    """Controls for authoritative caption ownership without layout mutation."""
+
+    enabled: bool = True
+    max_vertical_gap_page_ratio: float = 0.10
+    min_horizontal_overlap_ratio: float = 0.18
+    blocker_horizontal_overlap_ratio: float = 0.25
+    acceptance_score: float = 0.35
+    ambiguity_margin: float = 0.15
+
+
+@dataclass(frozen=True)
 class OverlapResolutionConfig:
     """Class-aware controls for the generalized relationship graph.
 
@@ -276,6 +288,9 @@ class PipelineConfig:
     reading_order: ReadingOrderConfig = field(default_factory=ReadingOrderConfig)
     table_context: TableContextConfig = field(default_factory=TableContextConfig)
     caption_overlap: CaptionOverlapConfig = field(default_factory=CaptionOverlapConfig)
+    caption_association: CaptionAssociationConfig = field(
+        default_factory=CaptionAssociationConfig
+    )
     overlap_resolution: OverlapResolutionConfig = field(
         default_factory=OverlapResolutionConfig
     )
@@ -311,6 +326,7 @@ class PipelineConfig:
             "reading_order": ReadingOrderConfig,
             "table_context": TableContextConfig,
             "caption_overlap": CaptionOverlapConfig,
+            "caption_association": CaptionAssociationConfig,
             "overlap_resolution": OverlapResolutionConfig,
             "containment": ContainmentConfig,
             "export": ExportConfig,
@@ -578,6 +594,17 @@ class PipelineConfig:
         ):
             if getattr(overlap, name) < 0:
                 raise ValueError(f"caption overlap {name} must be non-negative")
+        association = self.caption_association
+        for name in (
+            "max_vertical_gap_page_ratio",
+            "min_horizontal_overlap_ratio",
+            "blocker_horizontal_overlap_ratio",
+        ):
+            if not 0 <= getattr(association, name) <= 1:
+                raise ValueError(f"caption association {name} must be in [0, 1]")
+        for name in ("acceptance_score", "ambiguity_margin"):
+            if getattr(association, name) < 0:
+                raise ValueError(f"caption association {name} must be non-negative")
         generalized = self.overlap_resolution
         for name in (
             "duplicate_iou",

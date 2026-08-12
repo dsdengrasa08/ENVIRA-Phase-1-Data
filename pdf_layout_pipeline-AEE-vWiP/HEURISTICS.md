@@ -17,6 +17,7 @@ filenames, hashes, or document-specific exceptions.
 | Document tail | Secondary stream | conclusion/back-matter headings, sequence and page position | scholarly structure and English lexical | yes | confidence threshold and column reconciliation |
 | Content policy | Retain/secondary | semantic section category selected by consumer | consumer policy | no layout deletion | excluded content remains auditable |
 | Table/caption association | Associate | detector class, geometry, order, optional English prefixes | generic structure and language lexical | no | ambiguous candidates remain unattached |
+| General caption ownership | Associate | explicit identifier class, geometry, direction, column, blockers, competing-parent margin | generic structure and language lexical | no | incompatible, ambiguous, and unattached captions remain visible |
 | Containment observation | Observe only | shared strong/center coverage thresholds | generic geometry | no | cannot alter emission or reading order |
 | Hierarchy policy | Accept/flag | parent compatibility matrix and inferred child role | generic structure | only compatible children become nested | unknown, invalid, and ambiguous roles remain top-level |
 

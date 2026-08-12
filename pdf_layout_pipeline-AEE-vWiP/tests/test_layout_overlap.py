@@ -157,6 +157,43 @@ def test_caption_association_supports_figures_and_preserves_ambiguity():
     assert ambiguous[0]["parent_region_id"] is None
 
 
+def test_explicit_caption_identifier_constrains_parent_class():
+    relationships = associate_attachable_context(
+        [
+            region("figure", "Figure", [100, 200, 450, 500]),
+            region("table", "Table", [100, 510, 450, 700]),
+            region("caption", "Caption", [100, 705, 450, 750], "Table 2. Results"),
+        ],
+        PAGES,
+    )
+    assert relationships[0]["parent_region_id"] == "table"
+    assert relationships[0]["caption_reference"]["kind"] == "table"
+    assert {item["parent_type"] for item in relationships[0]["candidate_parents"]} == {
+        "Table"
+    }
+
+
+def test_caption_with_no_compatible_parent_is_auditable():
+    relationships = associate_attachable_context(
+        [region("caption", "Caption", [100, 100, 400, 140], "Figure 9. Missing")],
+        PAGES,
+    )
+    assert relationships[0]["status"] == "no_compatible_parent"
+    assert relationships[0]["parent_region_id"] is None
+
+
+def test_structural_blocker_prevents_caption_assignment():
+    relationships = associate_attachable_context(
+        [
+            region("figure", "Figure", [100, 100, 500, 300]),
+            region("heading", "Section-header", [100, 310, 500, 340], "Results"),
+            region("caption", "Caption", [100, 350, 500, 390], "Figure 1. Result"),
+        ],
+        PAGES,
+    )
+    assert relationships[0]["status"] == "no_compatible_parent"
+
+
 def test_disabled_resolution_still_preserves_source_and_resolved_boxes():
     result = resolve_layout_overlaps(
         [region("a", "Unknown", [1, 2, 3, 4])],

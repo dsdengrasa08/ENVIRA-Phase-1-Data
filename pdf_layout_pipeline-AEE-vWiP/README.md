@@ -56,6 +56,8 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `layout_overlap.py`: generalized class-family relationship graph, immutable
   source/resolved geometry, complete-link duplicate canonicalization,
   hierarchy/conflict/fragment analysis, and attachable-parent association.
+- `caption_association.py`: authoritative, class-aware and non-destructive
+  caption ownership with explicit ambiguity and unattached outcomes.
 
 ## Generalized overlap resolution
 
@@ -110,6 +112,15 @@ proposals restore detector geometry. Every proposal preserves source, proposed,
 resolved, visual-crop, and semantic-group boxes plus deterministic geometry history.
 Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
 with a source/proposal/barrier overlay in the workflow notebook.
+
+Caption ownership is resolved by one non-destructive, class-aware association
+stage. Explicit `Figure`, `Table`, `Equation`, `Algorithm`, and `Listing`
+identifiers constrain eligible parent classes; detector-only captions use the same
+geometry, column, direction, blocker, and ambiguity checks. Every candidate emits
+an associated, unresolved, or unattached relationship, and no caption association
+resizes, reclassifies, suppresses, or silently selects a parent by input order.
+All ownership thresholds live in the typed `caption_association` configuration
+section and the effective values are captured with the run configuration.
 
 ## Logical table context
 
