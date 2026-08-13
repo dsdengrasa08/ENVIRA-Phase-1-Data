@@ -85,6 +85,40 @@ def test_section_heading_is_a_stopping_boundary():
     assert "candidate" not in group["identifier_region_ids"]
 
 
+def test_figure_caption_containing_later_table_label_never_becomes_table_caption():
+    regions = [
+        region(
+            "combined-figure-caption",
+            "Caption",
+            [100, 100, 900, 190],
+            "Fig. 1. Seasonal precipitation and temperature. Table 2 Field treatment establishment.",
+            1,
+        ),
+        region("table", "Table", [100, 195, 900, 600], order=2),
+    ]
+
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == []
+    assert group["caption_region_ids"] == []
+
+
+def test_figure_caption_is_hard_boundary_during_table_caption_growth():
+    regions = [
+        region("table-label", "Caption", [100, 80, 300, 105], "Table 2.", 1),
+        region(
+            "figure-caption",
+            "Caption",
+            [100, 108, 900, 160],
+            "Fig. 1. Seasonal precipitation and temperature.",
+            2,
+        ),
+        region("table", "Table", [100, 165, 900, 600], order=3),
+    ]
+
+    group = associate(regions)[0]
+    assert "figure-caption" not in group["caption_region_ids"]
+
+
 def test_side_by_side_tables_use_exclusive_candidate_ownership():
     regions = [
         region(

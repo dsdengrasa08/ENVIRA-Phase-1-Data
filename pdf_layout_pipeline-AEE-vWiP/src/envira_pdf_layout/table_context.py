@@ -36,6 +36,12 @@ def _table_reference(text: Any, *, tolerant: bool = False):
     return reference if reference and reference.kind == "table" else None
 
 
+def _explicit_other_asset_reference(text: Any) -> str | None:
+    """Return a leading non-table caption kind that must not seed a table caption."""
+    reference = parse_semantic_caption_reference(text)
+    return reference.kind if reference and reference.kind != "table" else None
+
+
 def _page_size(page: dict[str, Any]) -> tuple[float, float]:
     return (
         float(page.get("image_width_px") or page.get("width_px") or 1),
@@ -166,6 +172,9 @@ def _score_edge(
         return None
 
     text = str(candidate.get("text") or "").strip()
+    other_asset_kind = _explicit_other_asset_reference(text)
+    if role == "caption" and other_asset_kind:
+        return None
     label_match = _table_reference(text, tolerant=True)
     negative_reasons = [] if label_match else body_reference_evidence(text)
     note_match = _NOTE_RE.search(text)
@@ -264,7 +273,12 @@ def _fragment_edge(
     if candidate.get("type") not in _FRAGMENT_TYPES:
         return None
     text = str(candidate.get("text") or "").strip()
-    if not text or _table_reference(text) or _NEW_OBJECT_RE.match(text):
+    if (
+        not text
+        or _table_reference(text)
+        or _explicit_other_asset_reference(text)
+        or _NEW_OBJECT_RE.match(text)
+    ):
         return None
     cb = list(map(float, candidate["bbox_px"]))
     mb = list(map(float, member["bbox_px"]))
@@ -658,6 +672,12 @@ def _caption_table_corridor_edge(
     text = str(candidate.get("text") or "").strip()
     if not text:
         return None
+    # A Figure/Fig. caption is a hard semantic boundary even when a detector
+    # emits one large box spanning the space between a Table caption and Table.
+    # Geometry must never absorb an explicitly identified different asset.
+    other_asset_kind = _explicit_other_asset_reference(text)
+    if other_asset_kind:
+        return None
 
     cb = list(map(float, candidate["bbox_px"]))
     sb = list(map(float, seed["bbox_px"]))
@@ -781,6 +801,10 @@ def associate_table_context(
                         or _table_reference(
                             str(candidate.get("text") or ""), tolerant=True
                         )
+                    ):
+                        continue
+                    if role == "caption" and _explicit_other_asset_reference(
+                        str(candidate.get("text") or "")
                     ):
                         continue
                     if role == "note" and not (
