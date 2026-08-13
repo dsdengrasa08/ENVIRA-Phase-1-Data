@@ -126,6 +126,7 @@ def initialize_region_schema(
         "page_width": (page_record.get("image_width_px") if page_record else None),
         "page_height": (page_record.get("image_height_px") if page_record else None),
     }
+    region.setdefault("orientation", None)
     refresh_geometry_metrics(region)
     return region
 
