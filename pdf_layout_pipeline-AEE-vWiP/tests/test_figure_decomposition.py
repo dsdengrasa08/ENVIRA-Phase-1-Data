@@ -95,6 +95,48 @@ def test_multiple_large_panels_for_one_caption_do_not_displace_other_figure(tmp_
     assert max(r["bbox_px"][2] - r["bbox_px"][0] for r in figures) < 400
 
 
+def test_caption_pixels_inside_parent_do_not_union_with_derived_figure(tmp_path):
+    regions = [
+        region("parent", "Figure", [30, 30, 770, 450]),
+        region("ca", "Caption", [40, 390, 330, 430], "Figure 8. Left result"),
+        region("cb", "Caption", [430, 390, 760, 430], "Figure 9. Right result"),
+    ]
+    # Caption-like foreground is intentionally inside the oversized source box.
+    boxes = [
+        (50, 50, 310, 360),
+        (450, 50, 740, 360),
+        (45, 398, 325, 422),
+        (435, 398, 755, 422),
+    ]
+    result = decompose_oversized_figures(
+        regions, page(tmp_path, boxes), FigureFilterConfig()
+    )
+    figures = {
+        r["decomposition_caption_region_id"]: r
+        for r in result.regions
+        if r["type"] == "Figure"
+    }
+    assert result.proposals[0]["decision"] == "accepted"
+    assert figures["ca"]["bbox_px"][3] <= regions[1]["bbox_px"][1]
+    assert figures["cb"]["bbox_px"][3] <= regions[2]["bbox_px"][1]
+
+
+def test_caption_bbox_clips_padding_even_when_caption_pixels_are_white(tmp_path):
+    regions = [
+        region("parent", "Figure", [30, 30, 770, 410]),
+        region("ca", "Caption", [40, 365, 330, 405], "Figure 8. Left result"),
+        region("cb", "Caption", [430, 365, 760, 405], "Figure 9. Right result"),
+    ]
+    result = decompose_oversized_figures(
+        regions,
+        page(tmp_path, [(50, 50, 310, 364), (450, 50, 740, 364)]),
+        FigureFilterConfig(decomposition_padding_page_ratio=0.01),
+    )
+    figures = [r for r in result.regions if r["type"] == "Figure"]
+    assert len(figures) == 2
+    assert all(r["bbox_px"][3] <= 365 for r in figures)
+
+
 def test_three_figures_are_not_capped_at_two(tmp_path):
     regions = [region("parent", "Figure", [20, 30, 780, 330])]
     boxes = [(30, 50, 220, 300), (305, 50, 495, 300), (580, 50, 770, 300)]

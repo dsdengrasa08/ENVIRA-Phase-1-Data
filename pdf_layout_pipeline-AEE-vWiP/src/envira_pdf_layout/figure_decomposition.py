@@ -97,15 +97,28 @@ def _caption_candidates(
 
 
 def _foreground_components(
-    image: Any, bbox: list[float], minimum_area_ratio: float
+    image: Any,
+    bbox: list[float],
+    minimum_area_ratio: float,
+    excluded_bboxes: list[list[float]] | None = None,
 ) -> tuple[Any, list[list[float]]]:
     from collections import deque
     import numpy as np
 
     x0, y0, x1, y1 = (int(round(v)) for v in bbox)
-    crop = np.asarray(image)[max(0, y0) : max(0, y1), max(0, x0) : max(0, x1)]
+    crop = np.asarray(image)[max(0, y0) : max(0, y1), max(0, x0) : max(0, x1)].copy()
     if crop.size == 0:
         return None, []
+    # A detector may include the caption rows in its oversized Figure bbox. Mask
+    # known caption geometry before visual segmentation so caption glyphs cannot
+    # become foreground components and pull a derived Figure down into its caption.
+    for excluded in excluded_bboxes or []:
+        ex0 = max(0, int(excluded[0]) - x0)
+        ey0 = max(0, int(excluded[1]) - y0)
+        ex1 = min(crop.shape[1], int(excluded[2] + 1) - x0)
+        ey1 = min(crop.shape[0], int(excluded[3] + 1) - y0)
+        if ex1 > ex0 and ey1 > ey0:
+            crop[ey0:ey1, ex0:ex1] = 255
     gray = np.mean(crop[..., :3], axis=2) if crop.ndim == 3 else crop
     # Work on a bounded-resolution density mask. Max-pooling retains fine plot
     # strokes while keeping the dependency-free component walk predictable.
@@ -211,6 +224,26 @@ def _group_bbox(group: list[list[float]]) -> list[float]:
         max(c[2] for c in group),
         max(c[3] for c in group),
     ]
+
+
+def _exclude_caption_from_figure_bbox(
+    bbox: list[float], caption_bbox: list[float]
+) -> list[float]:
+    """Keep a derived visual box physically disjoint from its caption anchor."""
+    result = list(map(float, bbox))
+    caption = list(map(float, caption_bbox))
+    horizontal_overlap = max(
+        0.0, min(result[2], caption[2]) - max(result[0], caption[0])
+    )
+    if horizontal_overlap <= 0:
+        return result
+    figure_center_y = (result[1] + result[3]) / 2
+    caption_center_y = (caption[1] + caption[3]) / 2
+    if caption_center_y >= figure_center_y and result[3] > caption[1]:
+        result[3] = max(result[1] + 1.0, caption[1])
+    elif caption_center_y < figure_center_y and result[1] < caption[3]:
+        result[1] = min(result[3] - 1.0, caption[3])
+    return result
 
 
 def _bridge_ratio(mask: Any, parent: list[float], boxes: list[list[float]]) -> float:
@@ -320,6 +353,7 @@ def decompose_oversized_figures(
             image,
             list(figure["bbox_px"]),
             config.decomposition_min_component_area_ratio,
+            [list(map(float, caption["bbox_px"])) for caption in captions],
         )
         assigned = _groups_for_captions(
             components, captions, page_h, config.decomposition_min_assignment_margin
@@ -373,6 +407,9 @@ def decompose_oversized_figures(
                 min(figure["bbox_px"][2], box[2] + pad),
                 min(figure["bbox_px"][3], box[3] + pad),
             ]
+            padded = _exclude_caption_from_figure_bbox(
+                padded, list(map(float, caption["bbox_px"]))
+            )
             child.update(
                 layout_region_id=child_id,
                 bbox_px=padded,
