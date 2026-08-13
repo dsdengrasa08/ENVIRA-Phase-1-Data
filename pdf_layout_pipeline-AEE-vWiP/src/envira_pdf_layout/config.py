@@ -267,6 +267,15 @@ class ErrorPolicyConfig:
 
 
 @dataclass(frozen=True)
+class CoreConfig:
+    """Controlled strangler rollout for the preserved core implementation."""
+
+    implementation: str = "preserved"
+    compare_with_preserved: bool = False
+    fail_on_difference: bool = True
+
+
+@dataclass(frozen=True)
 class HeuristicProfileConfig:
     """Optional lexical profiles; generic geometry remains authoritative."""
 
@@ -314,6 +323,7 @@ class PipelineConfig:
     containment: ContainmentConfig = field(default_factory=ContainmentConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     error_policy: ErrorPolicyConfig = field(default_factory=ErrorPolicyConfig)
+    core: CoreConfig = field(default_factory=CoreConfig)
     heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
     content_policy: ContentPolicyConfig = field(default_factory=ContentPolicyConfig)
     exclude_labels: frozenset[str] = frozenset()
@@ -349,6 +359,7 @@ class PipelineConfig:
             "containment": ContainmentConfig,
             "export": ExportConfig,
             "error_policy": ErrorPolicyConfig,
+            "core": CoreConfig,
             "heuristics": HeuristicProfileConfig,
             "content_policy": ContentPolicyConfig,
         }
@@ -676,3 +687,11 @@ class PipelineConfig:
             raise ValueError("error_policy max_failed_pages must be non-negative")
         if not 0 <= self.error_policy.max_failed_page_ratio <= 1:
             raise ValueError("error_policy max_failed_page_ratio must be in [0, 1]")
+        if self.core.implementation not in {"preserved", "extracted", "shadow_compare"}:
+            raise ValueError(
+                "core.implementation must be preserved, extracted, or shadow_compare"
+            )
+        if self.core.compare_with_preserved and self.core.implementation != "extracted":
+            raise ValueError(
+                "core.compare_with_preserved is only valid with extracted implementation"
+            )

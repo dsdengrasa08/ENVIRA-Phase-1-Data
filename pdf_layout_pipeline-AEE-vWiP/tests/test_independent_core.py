@@ -17,7 +17,7 @@ def test_production_pipeline_uses_package_owned_core():
 
 
 def test_production_core_uses_extracted_region_conversion_stage():
-    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    source = (PACKAGE / "preserved_core.py").read_text(encoding="utf-8")
     assert "from .region_conversion import convert_docling_document" in source
     assert "conversion_result = convert_docling_document(" in source
     assert "def docling_item_to_regions" not in source
@@ -32,13 +32,13 @@ def test_pipeline_has_no_remove_then_recover_nested_asset_path():
 
 
 def test_core_nested_asset_stage_is_non_destructive():
-    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    source = (PACKAGE / "preserved_core.py").read_text(encoding="utf-8")
     assert 'analysis["authoritative_mode"] = "non_destructive_proposals"' in source
     assert "return kept, [], analysis" in source
 
 
 def test_figure_completion_is_validated_before_nested_analysis():
-    source = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    source = (PACKAGE / "preserved_core.py").read_text(encoding="utf-8")
     validation = source.index(
         "figure_completion_validation = validate_figure_completions("
     )
@@ -47,7 +47,12 @@ def test_figure_completion_is_validated_before_nested_analysis():
 
 
 def test_runtime_modules_do_not_load_or_execute_a_notebook():
-    for filename in ("pipeline.py", "authoritative.py", "independent_core.py"):
+    for filename in (
+        "pipeline.py",
+        "authoritative.py",
+        "independent_core.py",
+        "preserved_core.py",
+    ):
         source = (PACKAGE / filename).read_text(encoding="utf-8")
         assert "json.loads" not in source
         assert "_REFERENCE_CELLS" not in source
@@ -90,6 +95,20 @@ def test_compatibility_entry_point_delegates_to_independent_core(monkeypatch):
 def test_independent_core_is_importable_without_reference_notebook():
     assert callable(independent_core.run_independent_core)
     assert callable(pipeline.run_layout_pipeline)
+
+
+def test_independent_core_is_a_small_dispatcher_not_the_preserved_monolith():
+    dispatcher = (PACKAGE / "independent_core.py").read_text(encoding="utf-8")
+    preserved = PACKAGE / "preserved_core.py"
+    assert dispatcher.count("\n") < 100
+    assert preserved.stat().st_size > 100_000
+    assert "run_preserved_core" in dispatcher
+
+
+def test_preserved_processing_no_longer_serializes_result_artifacts():
+    source = (PACKAGE / "preserved_core.py").read_text(encoding="utf-8")
+    for forbidden in ('.open("w"', ".to_csv(", "json.dump("):
+        assert forbidden not in source
 
 
 def test_overlap_containment_is_observational_only():

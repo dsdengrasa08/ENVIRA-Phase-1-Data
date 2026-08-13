@@ -83,6 +83,12 @@ error_policy:
   export_partial_results: true
   max_failed_pages: 3
   max_failed_page_ratio: 0.10
+core:
+  # `extracted` currently uses the typed strangler adapter; use shadow_compare
+  # during migration to publish semantic differences against the frozen core.
+  implementation: preserved
+  compare_with_preserved: false
+  fail_on_difference: true
 heuristics:
   # Publisher terms are data-only evidence and cannot delete content without
   # corroborating generic geometry/structure in confirmatory mode.

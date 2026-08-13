@@ -56,10 +56,10 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 - `runtime.py`, `paths.py`, `model_artifacts.py`: runtime, identity, persistence,
   and model setup.
 - `pdf_io.py`, `docling_backend.py`: input and backend boundary.
-- `independent_core.py`: package-owned orchestration of the remaining established
-  page-1 recovery, filters, asset recovery, reading order, and output construction.
-  Its preserved stage ordering remains the production implementation while stages
-  are migrated incrementally under equivalence tests.
+- `independent_core.py`: small implementation dispatcher and shadow-comparison boundary.
+- `preserved_core.py`: frozen compatibility extraction of the remaining established
+  stages; it is serialized and explicitly capability-limited while stages migrate to
+  immutable contracts. See [`CORE_MIGRATION.md`](CORE_MIGRATION.md).
 - `authoritative.py`: compatibility alias for callers using the former entry point;
   it delegates directly to the independent package core and does not load a
   notebook.
@@ -68,7 +68,7 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   fields, and reports skipped provenance explicitly.
 - `filtering/`, `assets/`, `reading_order.py`: smaller independently testable
   compatibility helpers. Until each is migrated under equivalence tests, the
-  corresponding established production heuristic remains in `independent_core.py`.
+  corresponding established compatibility heuristic remains in `preserved_core.py`.
 - `visualization.py`, `diagnostics.py`, `results.py`: visible notebook outputs.
 - `export.py`: serialization only.
 - `pipeline.py`: high-level stage orchestration.

@@ -112,7 +112,7 @@ def test_content_policy_restores_selected_valid_sections_only():
 
 def test_publisher_terms_are_not_embedded_in_production_filter_code():
     package = Path(__file__).parents[1] / "src" / "envira_pdf_layout"
-    core = (package / "independent_core.py").read_text(encoding="utf-8").casefold()
+    core = (package / "preserved_core.py").read_text(encoding="utf-8").casefold()
     assert "page1_upper_drop_text_re" not in core
     assert "compact_footer_publisher_re" not in core
     assert "compact_footer_publisher_word_re" not in core

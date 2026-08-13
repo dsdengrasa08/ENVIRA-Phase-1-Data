@@ -257,26 +257,6 @@ def run_layout_pipeline(conversion, page_set, config):
             "new_candidate_ids": sorted(proposal_ids - previous_ids),
         },
     }
-    previous_ids = {
-        str(decision.get("region_id"))
-        for decision in result.diagnostics.get("nested_assets", {}).get("decisions", [])
-        if decision.get("region_id")
-    }
-    proposal_ids = {str(proposal["child_region_id"]) for proposal in proposals}
-    result.diagnostics["nested_hierarchy"] = {
-        **hierarchy.diagnostics,
-        "relationships": hierarchy.relationships,
-        "decisions": hierarchy.decisions,
-        "top_level_count": len(result.top_level_regions),
-        "nested_count": len(result.nested_regions),
-        "legacy_comparison": {
-            "previous_candidate_ids": sorted(previous_ids),
-            "current_candidate_ids": sorted(proposal_ids),
-            "matched_ids": sorted(previous_ids & proposal_ids),
-            "missing_from_current_ids": sorted(previous_ids - proposal_ids),
-            "new_candidate_ids": sorted(proposal_ids - previous_ids),
-        },
-    }
     started = perf_counter()
     if config.table_context.enabled:
         table_metrics: dict[str, int] = {}
