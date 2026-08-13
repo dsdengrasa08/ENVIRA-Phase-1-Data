@@ -16,12 +16,29 @@ the documented `PHASE1_*` environment-variable overrides.
 ### Local/server
 
 ```bash
-python -m pip install -r requirements.txt
-export PYTHONPATH="$PWD/src"
+python -m pip install -e ".[notebook]"
 export PHASE1_USE_GOOGLE_DRIVE=0
 export PHASE1_PROJECT_DIR=/persistent/envira/phase1_docling
 jupyter lab pdf_layout_pipeline_workflow.ipynb
 ```
+
+The installed application also provides a notebook-independent CLI:
+
+```bash
+envira-pdf-layout config --effective --config config/default.yaml
+envira-pdf-layout run input.pdf --output-dir ./runs --config config/default.yaml
+envira-pdf-layout validate ./runs/outputs/docling_layout_only/DOCUMENT_ID
+envira-pdf-layout compare baseline.jsonl candidate.jsonl
+```
+
+CLI output is JSON. Exit codes are `0` for complete results, `2` for invalid
+configuration, `3` for invalid input, `4` for unavailable dependencies, `5` for
+an exported partial result, `6` for pipeline failure, and `7` for invalid artifacts.
+Existing terminal runs are refused by default. `--overwrite` starts a new attempt;
+`--resume` only reuses an artifact set whose source hash, effective-config hash, and
+manifest validation match. Export removes stale terminal markers before publication,
+uses `_EXPORTING` while files are replaced atomically, and writes exactly one terminal
+marker last so consumers never treat an in-progress publication as complete.
 
 The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the

@@ -15,7 +15,6 @@ from .types import LayoutRegion, PageSet
 from .schema import initialize_region_schema
 
 
-
 _TYPE_MAP = {
     "title": "Title",
     "section_header": "Section-header",

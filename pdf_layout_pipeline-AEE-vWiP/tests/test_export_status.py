@@ -75,8 +75,12 @@ def test_export_writes_hashed_manifest_page_diagnostics_and_status_marker(tmp_pa
     export_pipeline_result(run(tmp_path, "partial"))
     assert (tmp_path / "_PARTIAL").is_file()
     assert not (tmp_path / "_SUCCESS").exists()
+    assert not (tmp_path / "_EXPORTING").exists()
     manifest = json.loads((tmp_path / "artifact_manifest.json").read_text())
     assert manifest["run_status"] == "partial"
+    assert manifest["status_marker"] == "_PARTIAL"
+    assert manifest["package_version"] == "0.1.0"
+    assert manifest["attempt_id"]
     first = manifest["files"][0]
     payload = (tmp_path / first["path"]).read_bytes()
     assert first["sha256"] == hashlib.sha256(payload).hexdigest()
