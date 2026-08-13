@@ -190,6 +190,14 @@ growth, page bounds, newly captured regions, structural barriers, competing asse
 and column-gutter crossings before downstream filtering. Rejected and ambiguous
 proposals restore detector geometry. Every proposal preserves source, proposed,
 resolved, visual-crop, and semantic-group boxes plus deterministic geometry history.
+
+Oversized Figure decomposition runs after initial duplicate resolution and before
+authoritative hierarchy and caption ownership. It requires multiple distinct logical
+Figure-caption identities, separable foreground components, and an unambiguous joint
+caption/component assignment. Whitespace, aspect ratio, or page columns cannot split
+a Figure by themselves. Accepted proposals produce deterministic child regions with
+source lineage, rerun overlap resolution and reading order, and then participate in
+normal hierarchy and caption association; ambiguous proposals preserve the original.
 Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
 with a source/proposal/barrier overlay in the workflow notebook.
 

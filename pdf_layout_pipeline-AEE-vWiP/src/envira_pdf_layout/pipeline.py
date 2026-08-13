@@ -16,6 +16,7 @@ from .failures import (
     execute_stage,
     page_failure_budget_exceeded,
 )
+from .figure_decomposition import FigureDecompositionResult, decompose_oversized_figures
 from .independent_core import run_independent_core
 from .layout_overlap import ResolutionResult, resolve_layout_overlaps
 from .nested_containment import (
@@ -26,6 +27,7 @@ from .nested_containment import (
 from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
 from .region_index import RegionIndex
+from .reading_order import assign_document_reading_order
 from .schema import initialize_region_schema, normalize_relationship_schema
 
 
@@ -130,6 +132,67 @@ def run_layout_pipeline(conversion, page_set, config):
     else:
         result.completed_stages.append("overlap_resolution")
     result.stage_trace.append(overlap_snapshot)
+    decomposition_input = list(result.resolved_regions)
+    decomposition_run = execute_stage(
+        name="figure_decomposition",
+        operation=lambda: decompose_oversized_figures(
+            decomposition_input,
+            result.pages,
+            config.figures,
+            associate_captions(
+                decomposition_input,
+                result.pages,
+                config=config.caption_association,
+            ),
+        ),
+        fallback=lambda: FigureDecompositionResult(
+            list(decomposition_input), [], []
+        ),
+        fallback_name="preserve_original_figures",
+        mode=config.error_policy.mode,
+    )
+    decomposition = decomposition_run.value
+    if decomposition.replaced_regions:
+        # Topology changed: rebuild overlap observations and duplicate outcomes from
+        # the derived physical regions rather than retaining relationships to a
+        # replaced parent.
+        reordered, _ = assign_document_reading_order(
+            decomposition.regions,
+            {int(page["page_number"]): page for page in result.pages},
+            config.reading_order,
+        )
+        rerun = resolve_layout_overlaps(
+            reordered,
+            result.pages,
+            config.overlap_resolution,
+            config.containment,
+        )
+        result.resolved_regions = rerun.regions
+        result.layout_relationships = list(rerun.relationships)
+        result.resolution_decisions = rerun.decisions
+        result.suppressed_regions = list(resolution.suppressed) + list(
+            decomposition.replaced_regions
+        ) + list(rerun.suppressed)
+        effective_resolution = rerun
+    else:
+        result.resolved_regions = decomposition.regions
+        effective_resolution = resolution
+    result.diagnostics["figure_decomposition"] = decomposition.diagnostics
+    decomposition_snapshot = snapshot(
+        "figure_decomposition",
+        result.resolved_regions,
+        previous=overlap_snapshot,
+        decisions=decomposition.proposals,
+        elapsed_ms=decomposition_run.elapsed_ms,
+        status=decomposition_run.status,
+    )
+    decomposition_snapshot["fallback"] = decomposition_run.fallback
+    result.stage_trace.append(decomposition_snapshot)
+    if decomposition_run.issue:
+        result.issues.append(decomposition_run.issue.to_dict())
+        result.failed_stages.append("figure_decomposition")
+    else:
+        result.completed_stages.append("figure_decomposition")
     region_index = RegionIndex.build(result.resolved_regions, result.pages)
     containment_metrics: dict[str, int] = {}
     hierarchy_run = execute_stage(
@@ -163,7 +226,7 @@ def run_layout_pipeline(conversion, page_set, config):
     hierarchy_snapshot = snapshot(
         "nested_hierarchy",
         result.resolved_regions,
-        previous=overlap_snapshot,
+        previous=decomposition_snapshot,
         relationships=hierarchy.relationships,
         decisions=hierarchy.decisions,
         elapsed_ms=hierarchy_run.elapsed_ms,
@@ -245,7 +308,7 @@ def run_layout_pipeline(conversion, page_set, config):
     result.diagnostics["caption_overlap"] = {
         "relationship_count": len(result.caption_overlap_relationships),
         "suppressed_duplicate_region_ids": [
-            region["layout_region_id"] for region in resolution.suppressed
+            region["layout_region_id"] for region in result.suppressed_regions
         ],
         "relationships": result.caption_overlap_relationships,
     }
@@ -256,7 +319,7 @@ def run_layout_pipeline(conversion, page_set, config):
         "recovered_nested_region_count": 0,
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
-        "work": resolution.diagnostics,
+        "work": effective_resolution.diagnostics,
     }
     previous_ids = {
         str(decision.get("region_id"))

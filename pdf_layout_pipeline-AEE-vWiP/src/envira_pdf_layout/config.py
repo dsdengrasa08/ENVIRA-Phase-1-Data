@@ -158,6 +158,12 @@ class FigureFilterConfig:
     max_completion_edge_growth_ratio: float = 0.45
     completion_paragraph_min_chars: int = 80
     completion_min_assignment_score: float = 7.0
+    decompose_oversized: bool = True
+    decomposition_min_caption_identities: int = 2
+    decomposition_min_component_area_ratio: float = 0.025
+    decomposition_max_foreground_bridge_ratio: float = 0.08
+    decomposition_min_assignment_margin: float = 0.08
+    decomposition_padding_page_ratio: float = 0.002
 
 
 @dataclass(frozen=True)
@@ -777,6 +783,16 @@ class PipelineConfig:
             raise ValueError("headers roi_ocr_dpi must be at least 72")
         if not self.headers.roi_ocr_language.strip():
             raise ValueError("headers roi_ocr_language must not be empty")
+        if self.figures.decomposition_min_caption_identities < 2:
+            raise ValueError("figures decomposition requires at least two caption identities")
+        for name in (
+            "decomposition_min_component_area_ratio",
+            "decomposition_max_foreground_bridge_ratio",
+            "decomposition_min_assignment_margin",
+            "decomposition_padding_page_ratio",
+        ):
+            if not 0 <= getattr(self.figures, name) <= 1:
+                raise ValueError(f"figures {name} must be in [0, 1]")
         if self.error_policy.mode not in {"strict", "report"}:
             raise ValueError("error_policy mode must be strict or report")
         if self.error_policy.page_failure not in {"continue", "stop"}:
