@@ -9,13 +9,13 @@ from typing import Any
 from .config import TableContextConfig
 from .types import LayoutRegion
 from .region_index import RegionIndex
-
-_TABLE_LABEL_RE = re.compile(
-    r"^\s*(?P<label>(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
-    r"(?:table|tab\.)\s+(?:[A-Z](?:[.\-]?\d+)?|[IVXLCDM]+|\d+(?:[.\-]\w+)?))"
-    r"(?:\s*[:.\-])?(?:\s+|$)",
-    re.IGNORECASE,
+from .semantic_caption import (
+    body_reference_evidence,
+    find_table_reference_mention,
+    parse_fragmented_table_reference,
+    parse_semantic_caption_reference,
 )
+
 _NOTE_RE = re.compile(
     r"^\s*(?:notes?|sources?)\s*:|^\s*(?:[*†‡]|[a-z])(?:[.)]|\s{1,3})\s+|"
     r"\b[pP]\s*[<=>]\s*\.?\d+",
@@ -31,6 +31,11 @@ _FRAGMENT_TYPES = {"Text", "Caption", "List"}
 _BOUNDARY_TYPES = {"Table", "Figure", "Section-header", "Title"}
 
 
+def _table_reference(text: Any, *, tolerant: bool = False):
+    reference = parse_semantic_caption_reference(text, allow_ocr_tolerance=tolerant)
+    return reference if reference and reference.kind == "table" else None
+
+
 def _page_size(page: dict[str, Any]) -> tuple[float, float]:
     return (
         float(page.get("image_width_px") or page.get("width_px") or 1),
@@ -41,6 +46,17 @@ def _page_size(page: dict[str, Any]) -> tuple[float, float]:
 def _overlap_ratio(a: list[float], b: list[float]) -> float:
     overlap = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
     return overlap / max(1.0, min(a[2] - a[0], b[2] - b[0]))
+
+
+def _vertical_overlap_ratio(a: list[float], b: list[float]) -> float:
+    overlap = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return overlap / max(1.0, min(a[3] - a[1], b[3] - b[1]))
+
+
+def _intersection_area(a: list[float], b: list[float]) -> float:
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(
+        0.0, min(a[3], b[3]) - max(a[1], b[1])
+    )
 
 
 def _column_compatible(
@@ -98,14 +114,41 @@ def _score_edge(
     config: TableContextConfig,
 ) -> dict[str, Any] | None:
     cb, tb = list(map(float, candidate["bbox_px"])), list(map(float, table["bbox_px"]))
-    tolerance = config.max_boundary_overlap_page_ratio * page_height
-    above = cb[3] <= tb[1] + tolerance and cb[1] < tb[1]
-    below = cb[1] >= tb[3] - tolerance and cb[3] > tb[3]
-    if not (above or below) or candidate.get("type") not in _TEXT_TYPES:
+    tolerance = config.max_boundary_overlap_page_ratio * max(page_width, page_height)
+    sides = {
+        "above": (
+            cb[3] <= tb[1] + tolerance,
+            max(0.0, tb[1] - cb[3]),
+            _overlap_ratio(cb, tb),
+        ),
+        "below": (
+            cb[1] >= tb[3] - tolerance,
+            max(0.0, cb[1] - tb[3]),
+            _overlap_ratio(cb, tb),
+        ),
+        "left": (
+            cb[2] <= tb[0] + tolerance,
+            max(0.0, tb[0] - cb[2]),
+            _vertical_overlap_ratio(cb, tb),
+        ),
+        "right": (
+            cb[0] >= tb[2] - tolerance,
+            max(0.0, cb[0] - tb[2]),
+            _vertical_overlap_ratio(cb, tb),
+        ),
+    }
+    possible = [(name, values) for name, values in sides.items() if values[0]]
+    if not possible or candidate.get("type") not in _TEXT_TYPES:
         return None
-    gap = (tb[1] - cb[3]) if above else (cb[1] - tb[3])
-    gap_page = max(0.0, gap) / page_height
-    overlap = _overlap_ratio(cb, tb)
+    direction, (_, gap, overlap) = min(possible, key=lambda item: item[1][1])
+    signed_gap = {
+        "above": tb[1] - cb[3],
+        "below": cb[1] - tb[3],
+        "left": tb[0] - cb[2],
+        "right": cb[0] - tb[2],
+    }[direction]
+    axis_size = page_height if direction in {"above", "below"} else page_width
+    gap_page = gap / axis_size
     if gap_page > config.max_vertical_gap_page_ratio:
         return None
     if overlap < config.min_horizontal_overlap_ratio:
@@ -117,7 +160,8 @@ def _score_edge(
         return None
 
     text = str(candidate.get("text") or "").strip()
-    label_match = _TABLE_LABEL_RE.match(text)
+    label_match = _table_reference(text, tolerant=True)
+    negative_reasons = [] if label_match else body_reference_evidence(text)
     note_match = _NOTE_RE.search(text)
     style = candidate.get("typography") or {}
     is_italic = bool(style.get("italic") or candidate.get("is_italic"))
@@ -132,7 +176,7 @@ def _score_edge(
             table.get("layout_reading_order") or table.get("docling_reading_order") or 0
         )
     )
-    direction_ok = (role == "caption" and above) or (role == "note" and below)
+    direction_ok = role == "caption" or direction == "below"
     components = {
         "proximity": max(
             0.0, 2.4 * (1.0 - gap_page / config.max_vertical_gap_page_ratio)
@@ -153,6 +197,10 @@ def _score_edge(
         "identifier_lexical": 1.8 if label_match and role == "caption" else 0.0,
         "note_lexical": 1.5 if note_match and role == "note" else 0.0,
         "body_paragraph_penalty": -3.2 if _BODY_SENTENCE_RE.search(text) else 0.0,
+        "body_reference_penalty": -6.0 if negative_reasons else 0.0,
+        "ocr_tolerance_penalty": -0.5
+        if label_match and label_match.ocr_tolerant
+        else 0.0,
         "typography": (
             0.4 if (role == "note" and (is_italic or has_superscript)) else 0.0
         ),
@@ -164,18 +212,20 @@ def _score_edge(
         "proposed_role": role,
         "score": round(score, 4),
         "accepted": False,
-        "direction": "above" if above else "below",
+        "direction": direction,
         "features": {
             "gap_page_ratio": round(gap_page, 6),
-            "boundary_overlap_page_ratio": round(max(0.0, -gap) / page_height, 6),
+            "boundary_overlap_page_ratio": round(max(0.0, -signed_gap) / axis_size, 6),
             "horizontal_overlap_ratio": round(overlap, 6),
             "reading_order_delta": order_delta,
             "components": components,
         },
-        "printed_label": label_match.group("label").strip() if label_match else None,
+        "printed_label": label_match.label if label_match else None,
         "caption_text_after_label": bool(
-            label_match and text[label_match.end() :].strip()
+            label_match and text[label_match.end :].strip()
         ),
+        "semantic_reference": label_match.__dict__ if label_match else None,
+        "negative_reasons": negative_reasons,
     }
 
 
@@ -207,7 +257,7 @@ def _fragment_edge(
     if candidate.get("type") not in _FRAGMENT_TYPES:
         return None
     text = str(candidate.get("text") or "").strip()
-    if not text or _TABLE_LABEL_RE.match(text) or _NEW_OBJECT_RE.match(text):
+    if not text or _table_reference(text) or _NEW_OBJECT_RE.match(text):
         return None
     cb = list(map(float, candidate["bbox_px"]))
     mb = list(map(float, member["bbox_px"]))
@@ -330,6 +380,183 @@ def _group_bbox(regions: list[LayoutRegion]) -> list[float]:
     ]
 
 
+def _fragmented_identifier_candidates(
+    page_regions: list[LayoutRegion],
+    tables: list[LayoutRegion],
+    page_width: float,
+    page_height: float,
+) -> list[LayoutRegion]:
+    """Build provenance-only virtual anchors from two or three adjacent text boxes."""
+    text_regions = [
+        region
+        for region in sorted(page_regions, key=_order)
+        if region.get("type") in _FRAGMENT_TYPES
+        and str(region.get("text") or "").strip()
+    ]
+    output: list[LayoutRegion] = []
+    claimed: set[str] = set()
+    for size in (3, 2):
+        for start in range(len(text_regions) - size + 1):
+            members = text_regions[start : start + size]
+            member_ids = {str(member["layout_region_id"]) for member in members}
+            if member_ids & claimed:
+                continue
+            if any(
+                _order(right) - _order(left) > 1
+                for left, right in zip(members, members[1:])
+            ):
+                continue
+            boxes = [list(map(float, member["bbox_px"])) for member in members]
+            union_bbox = _group_bbox(members)
+            # Never synthesize one semantic anchor from detections on opposite
+            # sides of a table. Its union would paint a caption across the asset.
+            if any(
+                _intersection_area(union_bbox, list(map(float, table["bbox_px"]))) > 0
+                and not any(
+                    _intersection_area(box, list(map(float, table["bbox_px"]))) > 0
+                    for box in boxes
+                )
+                for table in tables
+            ):
+                continue
+            vertical_gap = max(box[1] for box in boxes) - min(box[3] for box in boxes)
+            horizontal_gap = max(box[0] for box in boxes) - min(box[2] for box in boxes)
+            if (
+                vertical_gap > page_height * 0.025
+                and horizontal_gap > page_width * 0.025
+            ):
+                continue
+            parsed = parse_fragmented_table_reference(
+                [member.get("text") for member in members], allow_ocr_tolerance=True
+            )
+            if not parsed or any(
+                _table_reference(member.get("text")) for member in members
+            ):
+                continue
+            reference, combined = parsed
+            virtual = dict(members[0])
+            virtual.update(
+                layout_region_id="fragmented:"
+                + "+".join(str(m["layout_region_id"]) for m in members),
+                type="Text",
+                text=combined,
+                bbox_px=union_bbox,
+                width_px=max(box[2] for box in boxes) - min(box[0] for box in boxes),
+                height_px=max(box[3] for box in boxes) - min(box[1] for box in boxes),
+                semantic_source_region_ids=[
+                    str(m["layout_region_id"]) for m in members
+                ],
+                semantic_reference=reference.__dict__,
+            )
+            output.append(virtual)
+            claimed.update(member_ids)
+    return output
+
+
+def _retain_one_caption_side(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one coherent caption lane per table while retaining independent notes.
+
+    Rotated tables commonly have a caption on one long edge and notes on the
+    opposite edge. Combining detector-class Caption boxes from both sides makes
+    the semantic union cross the table. A leading table identifier is the
+    authoritative side anchor; otherwise the strongest caption edge selects the
+    lane. Source detections on other sides remain untouched and ungrouped.
+    """
+    captions_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge["proposed_role"] == "caption":
+            captions_by_table[str(edge["table_region_id"])].append(edge)
+
+    selected_side: dict[str, str] = {}
+    for table_id, caption_edges in captions_by_table.items():
+        anchors = [edge for edge in caption_edges if edge.get("printed_label")]
+        pool = anchors or caption_edges
+        winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
+        selected_side[table_id] = str(winner["direction"])
+
+    return [
+        edge
+        for edge in edges
+        if edge["proposed_role"] != "caption"
+        or edge["direction"] == selected_side.get(str(edge["table_region_id"]))
+    ]
+
+
+def _reference_fragment_edge(
+    candidate: LayoutRegion,
+    member: LayoutRegion,
+    table: LayoutRegion,
+    caption_side: str,
+    page_width: float,
+    page_height: float,
+) -> dict[str, Any] | None:
+    """Join a Text table-number fragment to a Caption without merging geometry."""
+    if candidate.get("type") not in {"Text", "List"} or member.get("type") != "Caption":
+        return None
+    reference = find_table_reference_mention(candidate.get("text"))
+    if not reference:
+        return None
+    cb = list(map(float, candidate["bbox_px"]))
+    mb = list(map(float, member["bbox_px"]))
+    tb = list(map(float, table["bbox_px"]))
+    tolerance_x = page_width * 0.008
+    tolerance_y = page_height * 0.008
+    side_checks = {
+        "left": cb[2] <= tb[0] + tolerance_x and mb[2] <= tb[0] + tolerance_x,
+        "right": cb[0] >= tb[2] - tolerance_x and mb[0] >= tb[2] - tolerance_x,
+        "above": cb[3] <= tb[1] + tolerance_y and mb[3] <= tb[1] + tolerance_y,
+        "below": cb[1] >= tb[3] - tolerance_y and mb[1] >= tb[3] - tolerance_y,
+    }
+    same_side = side_checks.get(caption_side, False)
+
+    if same_side and caption_side in {"left", "right"}:
+        gap = max(0.0, max(cb[0], mb[0]) - min(cb[2], mb[2])) / page_width
+        alignment = _vertical_overlap_ratio(cb, mb)
+    elif same_side:
+        gap = max(0.0, max(cb[1], mb[1]) - min(cb[3], mb[3])) / page_height
+        alignment = _overlap_ratio(cb, mb)
+    else:
+        opposite_long_sides = (
+            caption_side == "left"
+            and mb[2] <= tb[0] + tolerance_x
+            and cb[0] >= tb[2] - tolerance_x
+        ) or (
+            caption_side == "right"
+            and mb[0] >= tb[2] - tolerance_x
+            and cb[2] <= tb[0] + tolerance_x
+        )
+        if not opposite_long_sides:
+            return None
+        gap = 0.0
+        alignment = _vertical_overlap_ratio(cb, mb)
+    if (same_side and gap > 0.035) or alignment < (0.30 if same_side else 0.70):
+        return None
+    return {
+        "table_region_id": str(table["layout_region_id"]),
+        "region_id": str(candidate["layout_region_id"]),
+        "member_region_id": str(member["layout_region_id"]),
+        "proposed_role": "caption_fragment",
+        "score": round(
+            6.0 + 2.0 * alignment - gap - (0.4 if not same_side else 0.0), 4
+        ),
+        "accepted": False,
+        "direction": caption_side,
+        "printed_label": reference.label,
+        "semantic_reference": reference.__dict__,
+        "features": {
+            "rule": (
+                "same_side_table_reference_next_to_caption"
+                if same_side
+                else "opposite_side_table_reference_same_caption"
+            ),
+            "gap_page_ratio": round(gap, 6),
+            "parallel_overlap_ratio": round(alignment, 6),
+            "crosses_table": not same_side,
+            "preserve_separate_geometry": True,
+        },
+    }
+
+
 def _caption_table_corridor_edge(
     candidate: LayoutRegion,
     seed: LayoutRegion,
@@ -430,9 +657,9 @@ def associate_table_context(
 
     groups: list[dict[str, Any]] = []
     for page_number in sorted(index.by_page):
-        page_regions = index.by_page[page_number]
+        source_page_regions = list(index.by_page[page_number])
         tables = sorted(
-            (region for region in page_regions if region.get("type") == "Table"),
+            (region for region in source_page_regions if region.get("type") == "Table"),
             key=lambda region: (
                 int(region.get("layout_reading_order") or 10**9),
                 float(region["bbox_px"][1]),
@@ -440,6 +667,9 @@ def associate_table_context(
             ),
         )
         width, height = index.page_sizes.get(page_number, (1.0, 1.0))
+        page_regions = source_page_regions + _fragmented_identifier_candidates(
+            source_page_regions, tables, width, height
+        )
         metrics["tables"] += len(tables)
         page_groups: dict[str, dict[str, Any]] = {}
         for ordinal, table in enumerate(tables, 1):
@@ -451,6 +681,7 @@ def associate_table_context(
                 "table_bbox": list(table["bbox_px"]),
                 "identifier_region_ids": [],
                 "caption_region_ids": [],
+                "caption_side": None,
                 "note_region_ids": [],
                 "printed_label": None,
                 "associations": [],
@@ -469,7 +700,9 @@ def associate_table_context(
                     metrics["candidate_role_pairs"] += 1
                     if role == "caption" and not (
                         candidate.get("type") == "Caption"
-                        or _TABLE_LABEL_RE.match(str(candidate.get("text") or ""))
+                        or _table_reference(
+                            str(candidate.get("text") or ""), tolerant=True
+                        )
                     ):
                         continue
                     if role == "note" and not (
@@ -486,6 +719,8 @@ def associate_table_context(
                         edges.append(edge)
                         metrics["scored_edges"] += 1
 
+        edges = _retain_one_caption_side(edges)
+
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:
             candidates[edge["region_id"]].append(edge)
@@ -501,19 +736,27 @@ def associate_table_context(
             winner["accepted"] = True
             winner["alternative_count"] = len(alternatives) - 1
             group = page_groups[winner["table_region_id"]]
+            source_ids = region_by_id[region_id].get(
+                "semantic_source_region_ids", [region_id]
+            )
             if winner["proposed_role"] == "caption":
+                group["caption_side"] = winner["direction"]
                 if winner["printed_label"]:
-                    group["identifier_region_ids"].append(region_id)
+                    group["identifier_region_ids"].extend(source_ids)
                     group["printed_label"] = (
                         group["printed_label"] or winner["printed_label"]
                     )
                     if winner["caption_text_after_label"]:
-                        group["caption_region_ids"].append(region_id)
+                        group["caption_region_ids"].extend(source_ids)
                 else:
-                    group["caption_region_ids"].append(region_id)
+                    group["caption_region_ids"].extend(source_ids)
             else:
                 group["note_region_ids"].append(region_id)
             group["associations"].append(winner)
+
+        # Virtual split-label candidates are association-only; graph growth and
+        # output always use their immutable physical source regions.
+        page_regions = source_page_regions
 
         # Grow captions from accepted label/class seeds using local adjacency.
         # Each round uses the current component as its frontier and assigns a
@@ -529,6 +772,65 @@ def associate_table_context(
             for region_id in group[key]
         }
         tables_by_id = {str(table["layout_region_id"]): table for table in tables}
+
+        # A detector may put the descriptive caption in a Caption box and the
+        # table-number phrase in an adjacent Text box. Attach that Text only when
+        # boxes are adjacent on one side or occupy aligned opposite long edges.
+        # The latter is a semantic link only; display geometry stays separate.
+        reference_proposals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for table_id, group in page_groups.items():
+            caption_side = group.get("caption_side")
+            if not caption_side:
+                continue
+            caption_seeds = [
+                region_by_id[region_id]
+                for region_id in dict.fromkeys(
+                    group["identifier_region_ids"] + group["caption_region_ids"]
+                )
+                if region_by_id[region_id].get("type") == "Caption"
+            ]
+            for candidate in page_regions:
+                candidate_id = str(candidate.get("layout_region_id"))
+                if candidate_id in owned or candidate_id == table_id:
+                    continue
+                for seed in caption_seeds:
+                    edge = _reference_fragment_edge(
+                        candidate,
+                        seed,
+                        tables_by_id[table_id],
+                        str(caption_side),
+                        width,
+                        height,
+                    )
+                    if edge:
+                        reference_proposals[candidate_id].append(edge)
+        for region_id, alternatives in reference_proposals.items():
+            best_by_table: dict[str, dict[str, Any]] = {}
+            for edge in alternatives:
+                table_id = edge["table_region_id"]
+                if (
+                    table_id not in best_by_table
+                    or edge["score"] > best_by_table[table_id]["score"]
+                ):
+                    best_by_table[table_id] = edge
+            ranked = sorted(
+                best_by_table.values(), key=lambda edge: edge["score"], reverse=True
+            )
+            if (
+                len(ranked) > 1
+                and ranked[0]["score"] - ranked[1]["score"]
+                < config.fragment_ambiguity_margin
+            ):
+                continue
+            winner = ranked[0]
+            winner["accepted"] = True
+            winner["alternative_count"] = len(ranked) - 1
+            group = page_groups[winner["table_region_id"]]
+            group["identifier_region_ids"].append(region_id)
+            group["caption_region_ids"].append(region_id)
+            group["printed_label"] = group["printed_label"] or winner["printed_label"]
+            group["associations"].append(winner)
+            owned.add(region_id)
 
         # A detector frequently emits only the short "Table N." label as a
         # Caption and emits the description as ordinary Text.  Include every
