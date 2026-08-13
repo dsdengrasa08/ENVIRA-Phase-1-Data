@@ -460,7 +460,44 @@ def _fragmented_identifier_candidates(
     return output
 
 
-def _retain_one_caption_side(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _caption_edge_has_identifier_neighbor(
+    edge: dict[str, Any],
+    regions_by_id: dict[str, LayoutRegion],
+    page_regions: list[LayoutRegion],
+    table: LayoutRegion,
+    page_width: float,
+    page_height: float,
+) -> bool:
+    """Whether a short Text identifier continues a rotated Caption lane."""
+    caption = regions_by_id[str(edge["region_id"])]
+    side = str(edge["direction"])
+    if caption.get("type") != "Caption" or side not in {"left", "right"}:
+        return False
+    cb = list(map(float, caption["bbox_px"]))
+    tb = list(map(float, table["bbox_px"]))
+    for region in page_regions:
+        if region.get("type") not in {"Text", "List"}:
+            continue
+        if not find_table_reference_mention(region.get("text")):
+            continue
+        rb = list(map(float, region["bbox_px"]))
+        same_side = (side == "left" and rb[2] <= tb[0] + page_width * 0.008) or (
+            side == "right" and rb[0] >= tb[2] - page_width * 0.008
+        )
+        lane_overlap = _overlap_ratio(cb, rb)
+        axis_gap = max(0.0, max(cb[1], rb[1]) - min(cb[3], rb[3])) / page_height
+        if same_side and lane_overlap >= 0.30 and axis_gap <= 0.035:
+            return True
+    return False
+
+
+def _retain_one_caption_side(
+    edges: list[dict[str, Any]],
+    page_regions: list[LayoutRegion],
+    tables: list[LayoutRegion],
+    page_width: float,
+    page_height: float,
+) -> list[dict[str, Any]]:
     """Keep one coherent caption lane per table while retaining independent notes.
 
     Rotated tables commonly have a caption on one long edge and notes on the
@@ -474,10 +511,24 @@ def _retain_one_caption_side(edges: list[dict[str, Any]]) -> list[dict[str, Any]
         if edge["proposed_role"] == "caption":
             captions_by_table[str(edge["table_region_id"])].append(edge)
 
+    regions_by_id = {str(region["layout_region_id"]): region for region in page_regions}
+    tables_by_id = {str(table["layout_region_id"]): table for table in tables}
     selected_side: dict[str, str] = {}
     for table_id, caption_edges in captions_by_table.items():
         anchors = [edge for edge in caption_edges if edge.get("printed_label")]
-        pool = anchors or caption_edges
+        neighboring_anchors = [
+            edge
+            for edge in caption_edges
+            if _caption_edge_has_identifier_neighbor(
+                edge,
+                regions_by_id,
+                page_regions,
+                tables_by_id[table_id],
+                page_width,
+                page_height,
+            )
+        ]
+        pool = anchors or neighboring_anchors or caption_edges
         winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
         selected_side[table_id] = str(winner["direction"])
 
@@ -517,11 +568,29 @@ def _reference_fragment_edge(
     same_side = side_checks.get(caption_side, False)
 
     if same_side and caption_side in {"left", "right"}:
-        gap = max(0.0, max(cb[0], mb[0]) - min(cb[2], mb[2])) / page_width
-        alignment = _vertical_overlap_ratio(cb, mb)
+        cross_gap = max(0.0, max(cb[0], mb[0]) - min(cb[2], mb[2])) / page_width
+        parallel_overlap = _vertical_overlap_ratio(cb, mb)
+        axis_gap = max(0.0, max(cb[1], mb[1]) - min(cb[3], mb[3])) / page_height
+        lane_overlap = _overlap_ratio(cb, mb)
+        # Rotated text flows along the page Y axis. A short Table-number box may
+        # therefore continue the top/bottom end of a tall Caption without any
+        # vertical overlap at all. Accept either side-by-side parallel overlap or
+        # a close, collinear continuation along that rotated reading axis.
+        parallel = cross_gap <= 0.035 and parallel_overlap >= 0.30
+        collinear = axis_gap <= 0.035 and lane_overlap >= 0.30
+        if not (parallel or collinear):
+            return None
+        gap = min(cross_gap if parallel else 1.0, axis_gap if collinear else 1.0)
+        alignment = max(
+            parallel_overlap if parallel else 0.0, lane_overlap if collinear else 0.0
+        )
+        orientation_relation = (
+            "parallel_overlap" if parallel else "rotated_axis_continuation"
+        )
     elif same_side:
         gap = max(0.0, max(cb[1], mb[1]) - min(cb[3], mb[3])) / page_height
         alignment = _overlap_ratio(cb, mb)
+        orientation_relation = "normal_axis_continuation"
     else:
         opposite_long_sides = (
             caption_side == "left"
@@ -536,6 +605,7 @@ def _reference_fragment_edge(
             return None
         gap = 0.0
         alignment = _vertical_overlap_ratio(cb, mb)
+        orientation_relation = "opposite_long_edges"
     if (same_side and gap > 0.035) or alignment < (0.30 if same_side else 0.70):
         return None
     return {
@@ -558,6 +628,7 @@ def _reference_fragment_edge(
             ),
             "gap_page_ratio": round(gap, 6),
             "parallel_overlap_ratio": round(alignment, 6),
+            "orientation_relation": orientation_relation,
             "crosses_table": not same_side,
             "preserve_separate_geometry": True,
         },
@@ -726,7 +797,7 @@ def associate_table_context(
                         edges.append(edge)
                         metrics["scored_edges"] += 1
 
-        edges = _retain_one_caption_side(edges)
+        edges = _retain_one_caption_side(edges, page_regions, tables, width, height)
 
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:
