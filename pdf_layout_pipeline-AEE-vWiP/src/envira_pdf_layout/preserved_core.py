@@ -16,6 +16,7 @@ from threading import RLock
 
 from .content_policy import apply_content_policy
 from .figure_completion import validate_figure_completions
+from .filtering.front_matter_roles import classify_page1_front_matter_roles
 from .heuristics import (
     classify_document_family,
     page1_publisher_decision,
@@ -14629,6 +14630,14 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         # seeds for expanding into adjacent affiliation list_item regions.
         page1_post_frontmatter_regions = list(filtered_regions)
 
+        # Classify valid-but-non-body publication apparatus using semantic and
+        # structural evidence before the legacy footer/sidebar filters reconcile.
+        page1_role_result = classify_page1_front_matter_roles(
+            page1_post_frontmatter_regions, page_map, config.page1
+        )
+        page1_role_excluded_regions = page1_role_result.excluded
+        page1_role_analysis = page1_role_result.diagnostics
+
         # Analyze lower metadata against the unmodified post-frontmatter input so its
         # anchor detection still sees correspondence/contact information.
         (
@@ -14659,6 +14668,10 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
             str(region.get("layout_region_id"))
             for region in page1_post_abstract_excluded_regions
         }
+        page1_role_drop_ids = {
+            str(region.get("layout_region_id"))
+            for region in page1_role_excluded_regions
+        }
         page1_protected_article_region_ids = {
             str(region_id)
             for region_id in page1_post_abstract_metadata_analysis.get(
@@ -14672,12 +14685,14 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
             if (
                 str(region.get("layout_region_id"))
                 not in page1_post_abstract_drop_ids
+                and str(region.get("layout_region_id")) not in page1_role_drop_ids
                 and str(region.get("layout_region_id"))
                 not in page1_protected_article_region_ids
             )
         ]
         page1_combined_drop_ids = (
             page1_post_abstract_drop_ids
+            | page1_role_drop_ids
             | {
                 str(region.get("layout_region_id"))
                 for region in page1_lower_excluded_regions
@@ -14692,6 +14707,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         if config.content_policy.retain_front_matter:
             restored_front_matter = (
                 page1_upper_excluded_regions
+                + page1_role_excluded_regions
                 + page1_lower_excluded_regions
                 + page1_post_abstract_excluded_regions
             )
@@ -14703,6 +14719,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
                 for region in restored_front_matter
             )
             page1_upper_excluded_regions = []
+            page1_role_excluded_regions = []
             page1_lower_excluded_regions = []
             page1_post_abstract_excluded_regions = []
         else:
@@ -14866,6 +14883,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         excluded_regions = (
             base_excluded_regions
             + page1_upper_excluded_regions
+            + page1_role_excluded_regions
             + page1_lower_excluded_regions
             + page1_post_abstract_excluded_regions
             + later_page_upper_excluded_regions
@@ -15468,6 +15486,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
     excluded = {
         "label_exclusions": base_excluded_regions,
         "page1_upper": page1_upper_excluded_regions,
+        "page1_roles": page1_role_excluded_regions,
         "page1_lower": page1_lower_excluded_regions,
         "page1_post_abstract": page1_post_abstract_excluded_regions,
         "later_headers": later_page_upper_excluded_regions,
@@ -15496,7 +15515,10 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
                 r["layout_region_id"] for r in restored_front_matter
             ],
         },
-        "page1": page1_post_abstract_metadata_analysis,
+        "page1": {
+            **page1_post_abstract_metadata_analysis,
+            "role_classification": page1_role_analysis,
+        },
         "later_headers": later_page_upper_header_analysis,
         "header_roi_ocr": _header_roi_ocr.diagnostics(),
         "small_edge_figures": small_edge_figure_analysis,

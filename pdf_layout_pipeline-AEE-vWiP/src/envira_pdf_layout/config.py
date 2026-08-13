@@ -127,6 +127,11 @@ class Page1FilterConfig:
     body_anchor_y_max: float = 0.70
     lower_metadata_min_y: float = 0.68
     hard_footer_y: float = 0.92
+    role_classification_enabled: bool = True
+    role_min_confidence: float = 0.78
+    role_cluster_max_vertical_gap: float = 0.035
+    role_cluster_min_horizontal_overlap: float = 0.45
+    role_max_candidate_words: int = 120
 
 
 @dataclass(frozen=True)
@@ -626,6 +631,16 @@ class PipelineConfig:
                     raise ValueError(f"{section_name}.{item.name} must be in [0, 1]")
         if self.page1.title_y_min > self.page1.title_y_max:
             raise ValueError("page1 title_y_min must not exceed title_y_max")
+        if not 0 <= self.page1.role_min_confidence <= 1:
+            raise ValueError("page1.role_min_confidence must be in [0, 1]")
+        if not 0 <= self.page1.role_cluster_max_vertical_gap <= 1:
+            raise ValueError("page1.role_cluster_max_vertical_gap must be in [0, 1]")
+        if not 0 <= self.page1.role_cluster_min_horizontal_overlap <= 1:
+            raise ValueError(
+                "page1.role_cluster_min_horizontal_overlap must be in [0, 1]"
+            )
+        if self.page1.role_max_candidate_words < 1:
+            raise ValueError("page1.role_max_candidate_words must be positive")
         if self.headers.min_repeat_pages < 1 or self.footer.min_repeat_pages < 1:
             raise ValueError("repeat-page thresholds must be positive")
         if self.figures.max_completion_area_multiplier < 1:
