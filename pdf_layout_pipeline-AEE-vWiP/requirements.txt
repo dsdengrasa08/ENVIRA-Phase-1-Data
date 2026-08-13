@@ -1,9 +1,2 @@
-docling
-pymupdf
-opencv-python-headless
-pandas
-matplotlib
-tqdm
-numpy
-pyyaml
-pytest
+# Compatibility installer. Canonical dependency metadata lives in pyproject.toml.
+.[test]
