@@ -30,7 +30,9 @@ class FigureDecompositionResult:
         return {
             "proposal_count": len(self.proposals),
             "accepted_count": sum(p["decision"] == "accepted" for p in self.proposals),
-            "ambiguous_count": sum(p["decision"] == "preserve_ambiguous" for p in self.proposals),
+            "ambiguous_count": sum(
+                p["decision"] == "preserve_ambiguous" for p in self.proposals
+            ),
             "replaced_region_count": len(self.replaced_regions),
             "proposals": self.proposals,
         }
@@ -45,46 +47,63 @@ def _page_size(page: dict[str, Any]) -> tuple[float, float]:
 
 def _caption_identity(region: LayoutRegion) -> tuple[str, str] | None:
     reference = parse_caption_reference(region.get("text") or region.get("orig"))
-    return (reference.kind, reference.number.casefold()) if reference and reference.kind == "figure" else None
+    return (
+        (reference.kind, reference.number.casefold())
+        if reference and reference.kind == "figure"
+        else None
+    )
 
 
 def _caption_candidates(
     figure: LayoutRegion,
     regions: list[LayoutRegion],
     page_h: float,
-    provisional_parent_ids: dict[str, str] | None = None,
+    conflicting_parent_ids: dict[str, str] | None = None,
 ) -> list[LayoutRegion]:
     fb = list(map(float, figure["bbox_px"]))
     candidates: dict[tuple[str, str], LayoutRegion] = {}
     for caption in regions:
         if caption.get("page_number") != figure.get("page_number"):
             continue
-        if provisional_parent_ids is not None and provisional_parent_ids.get(
+        # Provisional association is supporting evidence, not a prerequisite. An
+        # oversized Figure can itself cause the existing column matcher to leave a
+        # valid caption unattached. Only a confident association to another parent
+        # excludes the caption from this Figure's decomposition hypothesis.
+        if conflicting_parent_ids is not None and conflicting_parent_ids.get(
             str(caption["layout_region_id"])
-        ) != str(figure["layout_region_id"]):
+        ) not in {None, str(figure["layout_region_id"])}:
             continue
         identity = _caption_identity(caption)
         if identity is None:
             continue
         cb = list(map(float, caption["bbox_px"]))
-        overlap = max(0.0, min(fb[2], cb[2]) - max(fb[0], cb[0])) / max(1.0, cb[2] - cb[0])
+        overlap = max(0.0, min(fb[2], cb[2]) - max(fb[0], cb[0])) / max(
+            1.0, cb[2] - cb[0]
+        )
         gap = max(0.0, max(fb[1], cb[1]) - min(fb[3], cb[3])) / page_h
         if overlap < 0.18 or gap > 0.10:
             continue
         # Detector fragments carrying the same Figure identity count once. Prefer
         # the more informative/larger caption rather than manufacturing multiplicity.
         current = candidates.get(identity)
-        if current is None or len(str(caption.get("text") or "")) > len(str(current.get("text") or "")):
+        if current is None or len(str(caption.get("text") or "")) > len(
+            str(current.get("text") or "")
+        ):
             candidates[identity] = caption
-    return sorted(candidates.values(), key=lambda r: (r["bbox_px"][1], r["bbox_px"][0], r["layout_region_id"]))
+    return sorted(
+        candidates.values(),
+        key=lambda r: (r["bbox_px"][1], r["bbox_px"][0], r["layout_region_id"]),
+    )
 
 
-def _foreground_components(image: Any, bbox: list[float], minimum_area_ratio: float) -> tuple[Any, list[list[float]]]:
+def _foreground_components(
+    image: Any, bbox: list[float], minimum_area_ratio: float
+) -> tuple[Any, list[list[float]]]:
     from collections import deque
     import numpy as np
 
     x0, y0, x1, y1 = (int(round(v)) for v in bbox)
-    crop = np.asarray(image)[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+    crop = np.asarray(image)[max(0, y0) : max(0, y1), max(0, x0) : max(0, x1)]
     if crop.size == 0:
         return None, []
     gray = np.mean(crop[..., :3], axis=2) if crop.ndim == 3 else crop
@@ -93,7 +112,7 @@ def _foreground_components(image: Any, bbox: list[float], minimum_area_ratio: fl
     step = max(1, int(max(gray.shape) / 600))
     h = gray.shape[0] // step
     w = gray.shape[1] // step
-    reduced = gray[:h * step, :w * step].reshape(h, step, w, step).min(axis=(1, 3))
+    reduced = gray[: h * step, : w * step].reshape(h, step, w, step).min(axis=(1, 3))
     mask = reduced < 245
     crop_area = float(crop.shape[0] * crop.shape[1])
     components = []
@@ -117,53 +136,81 @@ def _foreground_components(image: Any, bbox: list[float], minimum_area_ratio: fl
                         queue.append((ny, nx))
         area = len(xs) * step * step
         if float(area) >= noise_floor:
-            components.append([float(min(xs) * step + x0), float(min(ys) * step + y0), float((max(xs) + 1) * step + x0), float((max(ys) + 1) * step + y0), float(area)])
+            components.append(
+                [
+                    float(min(xs) * step + x0),
+                    float(min(ys) * step + y0),
+                    float((max(xs) + 1) * step + x0),
+                    float((max(ys) + 1) * step + y0),
+                    float(area),
+                ]
+            )
     full_mask = np.repeat(np.repeat(mask, step, axis=0), step, axis=1)
-    return full_mask[:crop.shape[0], :crop.shape[1]], components
+    return full_mask[: crop.shape[0], : crop.shape[1]], components
 
 
-def _assignment_score(component: list[float], caption: LayoutRegion, page_h: float) -> float:
+def _assignment_score(
+    component: list[float], caption: LayoutRegion, page_h: float
+) -> float:
     cb = list(map(float, caption["bbox_px"]))
-    overlap = max(0.0, min(component[2], cb[2]) - max(component[0], cb[0])) / max(1.0, min(component[2] - component[0], cb[2] - cb[0]))
+    overlap = max(0.0, min(component[2], cb[2]) - max(component[0], cb[0])) / max(
+        1.0, min(component[2] - component[0], cb[2] - cb[0])
+    )
     ccx, ccy = (component[0] + component[2]) / 2, (component[1] + component[3]) / 2
     bx, by = (cb[0] + cb[2]) / 2, (cb[1] + cb[3]) / 2
-    distance = (((ccx - bx) / max(1.0, cb[2] - cb[0])) ** 2 + ((ccy - by) / page_h) ** 2) ** 0.5
-    direction = 0.08 if (cb[1] >= component[3] or cb[3] <= component[1]) else 0.0
+    distance = (
+        ((ccx - bx) / max(1.0, cb[2] - cb[0])) ** 2 + ((ccy - by) / page_h) ** 2
+    ) ** 0.5
+    # Figure captions are normally below their visual. A caption above a component
+    # is still possible, but is weaker evidence than the same caption immediately
+    # below a component; this disambiguates vertically stacked Figure/caption pairs.
+    direction = (
+        0.08 if cb[1] >= component[3] else -0.35 if cb[3] <= component[1] else 0.0
+    )
     return overlap + direction - 0.50 * distance
 
 
-def _groups_for_captions(components: list[list[float]], captions: list[LayoutRegion], page_h: float, margin: float) -> tuple[list[list[list[float]]], float] | None:
-    from itertools import permutations
-
-    if len(components) < len(captions) or len(captions) > 8:
+def _groups_for_captions(
+    components: list[list[float]],
+    captions: list[LayoutRegion],
+    page_h: float,
+    margin: float,
+) -> tuple[list[list[list[float]]], float] | None:
+    if len(components) < len(captions):
         return None
     groups: list[list[list[float]]] = [[] for _ in captions]
-    # Jointly seed one substantial component per identity. This avoids greedy
-    # failures for stacked layouts where an intervening caption is close to both
-    # components and also enforces the intended one-to-one semantic topology.
-    seeds = sorted(components, key=lambda c: c[4], reverse=True)[:len(captions)]
-    assignments = []
-    for order in permutations(range(len(captions))):
-        score = sum(_assignment_score(component, captions[target], page_h) for component, target in zip(seeds, order))
-        assignments.append((score, order))
-    assignments.sort(reverse=True)
-    assignment_margin = (assignments[0][0] - assignments[1][0]) / len(captions) if len(assignments) > 1 else 1.0
-    if assignment_margin < margin:
-        return None
-    for component, target in zip(seeds, assignments[0][1]):
-        groups[target].append(component)
+    weighted_margin = total_weight = 0.0
+    # Group every component around the semantic caption anchors. Selecting only
+    # the k largest components fails when two large panels belong to one caption:
+    # both seeds then represent the same Figure and displace the other Figure.
     for component in components:
-        if component in seeds:
-            continue
-        ranked = sorted(((_assignment_score(component, caption, page_h), i) for i, caption in enumerate(captions)), reverse=True)
+        ranked = sorted(
+            (
+                (_assignment_score(component, caption, page_h), i)
+                for i, caption in enumerate(captions)
+            ),
+            reverse=True,
+        )
         if not ranked:
             continue
         groups[ranked[0][1]].append(component)
+        weight = float(component[4])
+        component_margin = ranked[0][0] - ranked[1][0] if len(ranked) > 1 else 1.0
+        weighted_margin += weight * component_margin
+        total_weight += weight
+    assignment_margin = weighted_margin / max(1.0, total_weight)
+    if any(not group for group in groups) or assignment_margin < margin:
+        return None
     return groups, assignment_margin
 
 
 def _group_bbox(group: list[list[float]]) -> list[float]:
-    return [min(c[0] for c in group), min(c[1] for c in group), max(c[2] for c in group), max(c[3] for c in group)]
+    return [
+        min(c[0] for c in group),
+        min(c[1] for c in group),
+        max(c[2] for c in group),
+        max(c[3] for c in group),
+    ]
 
 
 def _bridge_ratio(mask: Any, parent: list[float], boxes: list[list[float]]) -> float:
@@ -173,7 +220,7 @@ def _bridge_ratio(mask: Any, parent: list[float], boxes: list[list[float]]) -> f
     px0, py0 = int(round(parent[0])), int(round(parent[1]))
     values = []
     for i, left in enumerate(boxes):
-        for right in boxes[i + 1:]:
+        for right in boxes[i + 1 :]:
             if left[2] <= right[0] or right[2] <= left[0]:
                 a, b = sorted((left, right), key=lambda box: box[0])
                 if any(
@@ -198,7 +245,7 @@ def _bridge_ratio(mask: Any, parent: list[float], boxes: list[list[float]]) -> f
                 x0, x1 = int(max(a[0], b[0]) - px0), int(min(a[2], b[2]) - px0)
             else:
                 return 1.0
-            corridor = mask[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+            corridor = mask[max(0, y0) : max(0, y1), max(0, x0) : max(0, x1)]
             values.append(float(np.count_nonzero(corridor)) / max(1, corridor.size))
     return max(values, default=1.0)
 
@@ -251,36 +298,125 @@ def decompose_oversized_figures(
             except (FileNotFoundError, OSError):
                 image = None
             page_images[page_number] = image
-        base = {"page_number": page_number, "figure_region_id": str(figure["layout_region_id"]), "source_bbox_px": list(figure["bbox_px"]), "caption_region_ids": [str(c["layout_region_id"]) for c in captions], "caption_identities": [_caption_identity(c) for c in captions]}
+        base = {
+            "page_number": page_number,
+            "figure_region_id": str(figure["layout_region_id"]),
+            "source_bbox_px": list(figure["bbox_px"]),
+            "caption_region_ids": [str(c["layout_region_id"]) for c in captions],
+            "caption_identities": [_caption_identity(c) for c in captions],
+        }
         if image is None:
-            proposals.append({**base, "decision": "preserve_ambiguous", "reason": "page_image_unavailable", "confidence": "low", "proposed_bbox_px": []})
+            proposals.append(
+                {
+                    **base,
+                    "decision": "preserve_ambiguous",
+                    "reason": "page_image_unavailable",
+                    "confidence": "low",
+                    "proposed_bbox_px": [],
+                }
+            )
             continue
-        mask, components = _foreground_components(image, list(figure["bbox_px"]), config.decomposition_min_component_area_ratio)
-        assigned = _groups_for_captions(components, captions, page_h, config.decomposition_min_assignment_margin)
+        mask, components = _foreground_components(
+            image,
+            list(figure["bbox_px"]),
+            config.decomposition_min_component_area_ratio,
+        )
+        assigned = _groups_for_captions(
+            components, captions, page_h, config.decomposition_min_assignment_margin
+        )
         if assigned is None:
-            proposals.append({**base, "decision": "preserve_ambiguous", "reason": "component_assignment_ambiguous", "confidence": "low", "component_count": len(components), "proposed_bbox_px": []})
+            proposals.append(
+                {
+                    **base,
+                    "decision": "preserve_ambiguous",
+                    "reason": "component_assignment_ambiguous",
+                    "confidence": "low",
+                    "component_count": len(components),
+                    "proposed_bbox_px": [],
+                }
+            )
             continue
         groups, assignment_margin = assigned
         boxes = [_group_bbox(group) for group in groups]
-        parent_area = max(1.0, (figure["bbox_px"][2] - figure["bbox_px"][0]) * (figure["bbox_px"][3] - figure["bbox_px"][1]))
-        substantial = all((b[2] - b[0]) * (b[3] - b[1]) / parent_area >= config.decomposition_min_component_area_ratio for b in boxes)
+        parent_area = max(
+            1.0,
+            (figure["bbox_px"][2] - figure["bbox_px"][0])
+            * (figure["bbox_px"][3] - figure["bbox_px"][1]),
+        )
+        substantial = all(
+            (b[2] - b[0]) * (b[3] - b[1]) / parent_area
+            >= config.decomposition_min_component_area_ratio
+            for b in boxes
+        )
         bridge = _bridge_ratio(mask, list(figure["bbox_px"]), boxes)
         if not substantial or bridge > config.decomposition_max_foreground_bridge_ratio:
-            proposals.append({**base, "decision": "preserve_ambiguous", "reason": "insufficient_visual_separation", "confidence": "low", "component_count": len(components), "proposed_bbox_px": boxes, "foreground_bridge_ratio": bridge})
+            proposals.append(
+                {
+                    **base,
+                    "decision": "preserve_ambiguous",
+                    "reason": "insufficient_visual_separation",
+                    "confidence": "low",
+                    "component_count": len(components),
+                    "proposed_bbox_px": boxes,
+                    "foreground_bridge_ratio": bridge,
+                }
+            )
             continue
         pad = config.decomposition_padding_page_ratio * max(page_w, page_h)
         children = []
         for index, (box, caption) in enumerate(zip(boxes, captions), 1):
             child = deepcopy(figure)
             child_id = f"{figure['layout_region_id']}__decomposed_{index:02d}"
-            padded = [max(figure["bbox_px"][0], box[0] - pad), max(figure["bbox_px"][1], box[1] - pad), min(figure["bbox_px"][2], box[2] + pad), min(figure["bbox_px"][3], box[3] + pad)]
-            child.update(layout_region_id=child_id, bbox_px=padded, source_region_ids=[str(figure["layout_region_id"])], source_bbox_px=list(figure["bbox_px"]), resolved_bbox_px=padded, physical_bbox_px=padded, visual_crop_bbox_px=padded, semantic_group_bbox_px=padded, synthetic_region=True, synthetic_detection_method="caption_visual_figure_decomposition", decomposition_parent_region_id=str(figure["layout_region_id"]), decomposition_caption_region_id=str(caption["layout_region_id"]), geometry_version=int(figure.get("geometry_version") or 1) + 1)
-            child["geometry_history"] = list(figure.get("geometry_history") or []) + [{"geometry_history_schema_version": 1, "geometry_version": child["geometry_version"], "stage": "figure_decomposition", "reason": "independent_caption_identity_and_visual_component", "source_bbox_px": list(figure["bbox_px"]), "proposed_bbox_px": padded, "resolved_bbox_px": padded, "accepted": True}]
+            padded = [
+                max(figure["bbox_px"][0], box[0] - pad),
+                max(figure["bbox_px"][1], box[1] - pad),
+                min(figure["bbox_px"][2], box[2] + pad),
+                min(figure["bbox_px"][3], box[3] + pad),
+            ]
+            child.update(
+                layout_region_id=child_id,
+                bbox_px=padded,
+                source_region_ids=[str(figure["layout_region_id"])],
+                source_bbox_px=list(figure["bbox_px"]),
+                resolved_bbox_px=padded,
+                physical_bbox_px=padded,
+                visual_crop_bbox_px=padded,
+                semantic_group_bbox_px=padded,
+                synthetic_region=True,
+                synthetic_detection_method="caption_visual_figure_decomposition",
+                decomposition_parent_region_id=str(figure["layout_region_id"]),
+                decomposition_caption_region_id=str(caption["layout_region_id"]),
+                geometry_version=int(figure.get("geometry_version") or 1) + 1,
+            )
+            child["geometry_history"] = list(figure.get("geometry_history") or []) + [
+                {
+                    "geometry_history_schema_version": 1,
+                    "geometry_version": child["geometry_version"],
+                    "stage": "figure_decomposition",
+                    "reason": "independent_caption_identity_and_visual_component",
+                    "source_bbox_px": list(figure["bbox_px"]),
+                    "proposed_bbox_px": padded,
+                    "resolved_bbox_px": padded,
+                    "accepted": True,
+                }
+            ]
             initialize_region_schema(child, page_record=page)
             children.append(child)
         replacements[str(figure["layout_region_id"])] = children
         replaced.append(deepcopy(figure))
-        proposals.append({**base, "decision": "accepted", "reason": "independent_caption_identities_with_separable_components", "confidence": "high", "derived_region_ids": [c["layout_region_id"] for c in children], "proposed_bbox_px": boxes, "component_count": len(components), "assignment_margin": assignment_margin, "foreground_bridge_ratio": bridge})
+        proposals.append(
+            {
+                **base,
+                "decision": "accepted",
+                "reason": "independent_caption_identities_with_separable_components",
+                "confidence": "high",
+                "derived_region_ids": [c["layout_region_id"] for c in children],
+                "proposed_bbox_px": boxes,
+                "component_count": len(components),
+                "assignment_margin": assignment_margin,
+                "foreground_bridge_ratio": bridge,
+            }
+        )
     output = []
     for region in working:
         output.extend(replacements.get(str(region["layout_region_id"]), [region]))
