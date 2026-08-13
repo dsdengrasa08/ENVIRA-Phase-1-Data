@@ -270,3 +270,41 @@ def test_overlap_relationship_evidence_is_retained_on_fragment_edge():
 
     assert edge["features"]["relationship_kinds"] == ["FRAGMENT_CANDIDATE"]
     assert edge["features"]["components"]["overlap_evidence"] == 0.5
+
+
+def test_identifier_text_is_semantic_first_even_when_detector_order_is_later():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "continuation", "Caption", [100, 100, 700, 125], "continued description", 1
+        ),
+        region("identifier", "Text", [100, 128, 700, 153], "Table 4. Results", 2),
+        region("table", "Table", [100, 158, 700, 500], order=3),
+    ]
+    logical = associate(regions)
+    groups = build_caption_groups(regions, logical, [], PAGES)
+    assert groups[0]["ordered_source_region_ids"][0] == "identifier"
+    assert groups[0]["text"] == "Table 4. Results continued description"
+
+
+def test_fragmented_table_identifier_is_reconstructed_from_adjacent_boxes():
+    regions = [
+        region("word", "Text", [100, 100, 180, 125], "Table", 1),
+        region("number", "Text", [185, 100, 220, 125], "4.", 2),
+        region("description", "Text", [225, 100, 700, 125], "Experimental results", 3),
+        region("table", "Table", [100, 130, 700, 500], order=4),
+    ]
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == ["word", "number", "description"]
+    assert all(region["type"] == "Text" for region in regions[:3])
+
+
+def test_rotated_table_accepts_caption_on_table_local_side():
+    regions = [
+        region("identifier", "Text", [80, 100, 120, 800], "Table S2. Outcomes", 1),
+        region("table", "Table", [125, 100, 600, 800], order=2),
+    ]
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == ["identifier"]
+    assert group["associations"][0]["direction"] == "left"
