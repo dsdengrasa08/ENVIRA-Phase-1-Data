@@ -1,8 +1,10 @@
 from envira_pdf_layout.table_context import associate_table_context
 
 
-def region(region_id, typ, bbox, text="", order=1, column="single", page=1):
-    return {
+def region(
+    region_id, typ, bbox, text="", order=1, column="single", page=1, orientation=None
+):
+    value = {
         "layout_region_id": region_id,
         "page_number": page,
         "type": typ,
@@ -12,6 +14,13 @@ def region(region_id, typ, bbox, text="", order=1, column="single", page=1):
         "layout_reading_order": order,
         "reading_order_column": column,
     }
+    if orientation is not None:
+        value["orientation"] = {
+            "angle_degrees": orientation,
+            "confidence": 1.0,
+            "source": "test_fixture",
+        }
+    return value
 
 
 PAGES = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
@@ -358,7 +367,7 @@ def test_rotated_caption_and_table_can_have_different_page_columns():
             "table-number-text",
             "Text",
             [30, 100, 75, 800],
-            "See Table 2 for treatment codes.",
+            "Table 2. Treatment codes.",
             2,
             "left",
         ),
@@ -464,7 +473,7 @@ def test_fragmented_identifier_cannot_be_synthesized_across_table():
     assert group["caption_region_ids"] == []
 
 
-def test_text_table_number_joins_adjacent_caption_on_same_side_only():
+def test_body_table_reference_does_not_join_adjacent_caption():
     from envira_pdf_layout.caption_overlap import build_caption_groups
 
     regions = [
@@ -488,25 +497,17 @@ def test_text_table_number_joins_adjacent_caption_on_same_side_only():
     logical = associate(regions)
     group = logical[0]
     assert group["caption_side"] == "right"
-    assert group["identifier_region_ids"] == ["table-number-text"]
-    assert group["caption_region_ids"] == ["caption", "table-number-text"]
-    assert (
-        next(
-            edge
-            for edge in group["associations"]
-            if edge["region_id"] == "table-number-text"
-        )["features"]["rule"]
-        == "same_side_table_reference_next_to_caption"
-    )
+    assert group["identifier_region_ids"] == []
+    assert group["caption_region_ids"] == ["caption"]
 
     caption = build_caption_groups(regions, logical, [], PAGES)[0]
-    assert caption["ordered_source_region_ids"] == ["table-number-text", "caption"]
-    assert "See Table 2" in caption["text"]
-    assert caption["bbox_px"] == [605.0, 100.0, 700.0, 800.0]
+    assert caption["ordered_source_region_ids"] == ["caption"]
+    assert "See Table 2" not in caption["text"]
+    assert caption["bbox_px"] == [605.0, 100.0, 650.0, 800.0]
     assert caption["bbox_px"][0] > group["table_bbox"][2]
 
 
-def test_text_table_number_can_join_opposite_caption_without_spanning_table_bbox():
+def test_leading_identifier_selects_its_lane_instead_of_crossing_table():
     from envira_pdf_layout.caption_overlap import build_caption_groups
 
     regions = [
@@ -522,29 +523,151 @@ def test_text_table_number_can_join_opposite_caption_without_spanning_table_bbox
             "table-number-text",
             "Text",
             [605, 100, 650, 800],
-            "See Table 2 for treatment codes.",
+            "Table 2. Treatment codes.",
             3,
         ),
     ]
 
     logical = associate(regions)
     group = logical[0]
-    assert group["caption_side"] == "left"
+    assert group["caption_side"] == "right"
     assert group["identifier_region_ids"] == ["table-number-text"]
-    assert group["caption_region_ids"] == ["caption-left", "table-number-text"]
-    edge = next(
-        edge
-        for edge in group["associations"]
-        if edge["region_id"] == "table-number-text"
-    )
-    assert edge["features"]["rule"] == "opposite_side_table_reference_same_caption"
-    assert edge["features"]["preserve_separate_geometry"] is True
+    assert group["caption_region_ids"] == ["table-number-text"]
 
     caption = build_caption_groups(regions, logical, [], PAGES)[0]
-    assert caption["bbox_spans_table"] is True
-    assert caption["bbox_parts"] == [
-        [605.0, 100.0, 650.0, 800.0],
-        [80.0, 100.0, 120.0, 800.0],
+    assert caption["bbox_spans_table"] is False
+    assert caption["bbox_parts"] == [[605.0, 100.0, 650.0, 800.0]]
+    assert caption["bbox_px"] == [605.0, 100.0, 650.0, 800.0]
+    assert caption["bbox_px"][0] > group["table_bbox"][2]
+
+
+def test_explicit_270_degree_orientation_orders_identifier_before_caption():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "caption",
+            "Caption",
+            [30, 100, 75, 755],
+            "Seasonal emissions by treatment.",
+            1,
+            orientation=270,
+        ),
+        region(
+            "identifier",
+            "Text",
+            [30, 760, 75, 800],
+            "Table S3.",
+            2,
+            orientation=270,
+        ),
+        region("table", "Table", [80, 100, 600, 800], order=3),
     ]
-    assert caption["bbox_px"] == [80.0, 100.0, 120.0, 800.0]
-    assert caption["bbox_px"][2] < group["table_bbox"][0]
+    logical = associate(regions)
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["identifier", "caption"]
+    assert caption["text"] == "Table S3. Seasonal emissions by treatment."
+    assert caption["orientation"]["angle_degrees"] == 270
+    assert caption["geometry_space"] == "table_local_orientation"
+
+
+def test_incompatible_orientation_does_not_join_caption():
+    regions = [
+        region(
+            "caption", "Caption", [30, 100, 75, 755], "Seasonal emissions.", 1,
+            orientation=90,
+        ),
+        region(
+            "identifier", "Text", [30, 760, 75, 800], "Table 4.", 2,
+            orientation=0,
+        ),
+        region("table", "Table", [80, 100, 600, 800], order=3),
+    ]
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == ["identifier"]
+    assert group["caption_region_ids"] == []
+
+
+def test_rotated_caption_graph_grows_plain_text_in_normalized_space():
+    regions = [
+        region(
+            "identifier",
+            "Caption",
+            [30, 100, 75, 250],
+            "Table 4. Seasonal emissions",
+            1,
+            orientation=90,
+        ),
+        region(
+            "continuation",
+            "Text",
+            [30, 255, 75, 500],
+            "under different treatments.",
+            2,
+            orientation=90,
+        ),
+        region("table", "Table", [80, 100, 600, 800], order=3),
+    ]
+    group = associate(regions)[0]
+    assert group["caption_region_ids"] == ["identifier", "continuation"]
+    edge = next(
+        edge for edge in group["associations"] if edge["region_id"] == "continuation"
+    )
+    assert edge["features"]["geometry_space"] == "table_local_orientation"
+
+
+def test_rotated_table_cell_identifier_is_not_caption_content():
+    regions = [
+        region(
+            "caption", "Caption", [30, 100, 75, 500], "Seasonal emissions.", 1,
+            orientation=90,
+        ),
+        region("table", "Table", [80, 100, 600, 800], order=2),
+        region(
+            "cell", "Text", [200, 200, 240, 500], "Table 4", 3,
+            orientation=90,
+        ),
+    ]
+    group = associate(regions)[0]
+    assert "cell" not in group["identifier_region_ids"]
+    assert "cell" not in group["caption_region_ids"]
+
+
+def test_compact_identifier_overlapping_rotated_caption_boundary_is_grouped():
+    """A small detector boundary overlap must not strand the Table label as Text."""
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "identifier",
+            "Text",
+            [64, 315, 78, 340],
+            "Table 2.",
+            3,
+            orientation=90,
+        ),
+        region(
+            "caption",
+            "Caption",
+            [72, 20, 84, 320],
+            "Seasonal emissions under different treatments.",
+            1,
+            orientation=90,
+        ),
+        region("table", "Table", [85, 20, 495, 320], order=2),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["identifier_region_ids"] == ["identifier"]
+    assert group["caption_region_ids"] == ["caption", "identifier"]
+    edge = next(
+        edge for edge in group["associations"] if edge["region_id"] == "identifier"
+    )
+    assert edge["features"]["orientation_relation"] == "normalized_boundary_overlap"
+
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["identifier", "caption"]
+    assert caption["text"] == (
+        "Table 2. Seasonal emissions under different treatments."
+    )

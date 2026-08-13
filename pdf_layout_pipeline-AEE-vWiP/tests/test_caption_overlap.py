@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from envira_pdf_layout.caption_overlap import (
+    annotate_caption_members,
     build_caption_groups,
     overlap_features,
     resolve_caption_overlaps,
@@ -247,3 +248,14 @@ def test_caption_group_exposes_parent_union_and_provenance_children():
         [100, 100, 220, 130],
         [100, 135, 700, 165],
     ]
+
+    annotate_caption_members(regions, [group])
+    by_id = {value["layout_region_id"]: value for value in regions}
+    assert by_id["description"]["type"] == "Text"
+    assert by_id["description"]["docling_label"] == "text"
+    assert by_id["description"]["resolved_type"] == "Caption"
+    assert by_id["description"]["semantic_type"] == "Table Caption"
+    assert by_id["description"]["semantic_role"] == "table_caption_fragment"
+    assert by_id["label"]["semantic_role"] == "table_caption_identifier"
+    assert by_id["description"]["semantic_group_id"] == group["resolved_region_id"]
+    assert by_id["description"]["semantic_parent_table_region_id"] == "table"

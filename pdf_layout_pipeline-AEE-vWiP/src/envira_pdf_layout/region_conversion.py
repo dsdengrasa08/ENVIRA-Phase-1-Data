@@ -13,6 +13,7 @@ from typing import Any
 from .geometry import bbox_area, clip_bbox
 from .types import LayoutRegion, PageSet
 from .schema import initialize_region_schema
+from .orientation import normalize_angle
 
 
 _TYPE_MAP = {
@@ -188,6 +189,12 @@ def convert_docling_document(
                 skipped_geometry_count += 1
                 continue
             x0, y0, x1, y1 = bbox_px
+            raw_orientation = _value(provenance, "orientation", None)
+            if raw_orientation is None:
+                raw_orientation = _value(item, "orientation", None)
+            if raw_orientation is None:
+                raw_orientation = _value(provenance, "rotation", None)
+            orientation_angle = normalize_angle(raw_orientation)
             region = {
                 "doc_id": document_id,
                 "pdf_hash": pdf_hash,
@@ -218,6 +225,15 @@ def convert_docling_document(
                 "height_px": float(y1 - y0),
                 "area_px": float(bbox_area(bbox_px)),
                 "source": "docling",
+                "orientation": (
+                    {
+                        "angle_degrees": orientation_angle,
+                        "confidence": 1.0,
+                        "source": "docling_provenance",
+                    }
+                    if orientation_angle is not None
+                    else None
+                ),
             }
             initialize_region_schema(region, page_record=page_map[page_number])
             region["source_coordinate_space"] = {

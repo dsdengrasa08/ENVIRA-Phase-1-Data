@@ -9,6 +9,13 @@ from typing import Any
 from .config import TableContextConfig
 from .types import LayoutRegion
 from .region_index import RegionIndex
+from .orientation import (
+    compatible_orientation,
+    interval_overlap_ratio,
+    local_relation,
+    project_bbox,
+    region_orientation,
+)
 from .semantic_caption import (
     body_reference_evidence,
     find_table_reference_mention,
@@ -172,6 +179,7 @@ def _score_edge(
         return None
 
     text = str(candidate.get("text") or "").strip()
+    orientation = region_orientation(candidate)
     other_asset_kind = _explicit_other_asset_reference(text)
     if role == "caption" and other_asset_kind:
         return None
@@ -234,6 +242,8 @@ def _score_edge(
             "horizontal_overlap_ratio": round(overlap, 6),
             "reading_order_delta": order_delta,
             "rotated_side_column_override": rotated_side_compatible,
+            "orientation": orientation,
+            "geometry_space": "page_axes_fallback",
             "components": components,
         },
         "printed_label": label_match.label if label_match else None,
@@ -276,6 +286,7 @@ def _fragment_edge(
     if (
         not text
         or _table_reference(text)
+        or find_table_reference_mention(text)
         or _explicit_other_asset_reference(text)
         or _NEW_OBJECT_RE.match(text)
     ):
@@ -283,6 +294,48 @@ def _fragment_edge(
     cb = list(map(float, candidate["bbox_px"]))
     mb = list(map(float, member["bbox_px"]))
     tb = list(map(float, table["bbox_px"]))
+    member_orientation = region_orientation(member)
+    angle = member_orientation["angle_degrees"]
+    if angle is not None and min(abs(angle % 180.0), abs((angle % 180.0) - 180.0)) > 12.0:
+        orientation_compatible = compatible_orientation(candidate, member)
+        if orientation_compatible is not False:
+            member_table = local_relation(mb, tb, angle)
+            candidate_table = local_relation(cb, tb, angle)
+            candidate_member = local_relation(cb, mb, angle)
+            same_external_side = (
+                member_table["side"] in {"before", "after"}
+                and candidate_table["side"] == member_table["side"]
+            )
+            scale = max(1.0, (page_width**2 + page_height**2) ** 0.5)
+            gap_page = float(candidate_member["gap"]) / scale
+            alignment = float(candidate_member["overlap"])
+            if (
+                same_external_side
+                and candidate_member["side"] is not None
+                and gap_page <= config.fragment_max_gap_page_ratio
+                and alignment >= config.fragment_min_horizontal_overlap
+                and _intersection_area(cb, tb) == 0
+                and not _has_blocker(candidate, member, page_regions)
+            ):
+                return {
+                    "table_region_id": str(table["layout_region_id"]),
+                    "region_id": str(candidate["layout_region_id"]),
+                    "member_region_id": str(member["layout_region_id"]),
+                    "proposed_role": "caption_fragment",
+                    "score": round(5.2 + 1.8 * alignment - gap_page, 4),
+                    "accepted": False,
+                    "direction": "left" if member_table["side"] == "after" else "right",
+                    "features": {
+                        "geometry_space": "table_local_orientation",
+                        "orientation": member_orientation,
+                        "orientation_compatible": orientation_compatible,
+                        "local_table_side": member_table["side"],
+                        "local_fragment_relation": candidate_member["side"],
+                        "gap_page_ratio": round(gap_page, 6),
+                        "parallel_overlap_ratio": round(alignment, 6),
+                        "relationship_kinds": sorted(relationship_kinds),
+                    },
+                }
     member_above = (mb[1] + mb[3]) / 2 < (tb[1] + tb[3]) / 2
     candidate_above = (cb[1] + cb[3]) / 2 < (tb[1] + tb[3]) / 2
     if member_above != candidate_above:
@@ -492,7 +545,7 @@ def _caption_edge_has_identifier_neighbor(
     for region in page_regions:
         if region.get("type") not in {"Text", "List"}:
             continue
-        if not find_table_reference_mention(region.get("text")):
+        if not _table_reference(region.get("text"), tolerant=True):
             continue
         rb = list(map(float, region["bbox_px"]))
         same_side = (side == "left" and rb[2] <= tb[0] + page_width * 0.008) or (
@@ -528,6 +581,7 @@ def _retain_one_caption_side(
     regions_by_id = {str(region["layout_region_id"]): region for region in page_regions}
     tables_by_id = {str(table["layout_region_id"]): table for table in tables}
     selected_side: dict[str, str] = {}
+    selected_orientation_anchor: dict[str, LayoutRegion] = {}
     for table_id, caption_edges in captions_by_table.items():
         anchors = [edge for edge in caption_edges if edge.get("printed_label")]
         neighboring_anchors = [
@@ -545,12 +599,20 @@ def _retain_one_caption_side(
         pool = anchors or neighboring_anchors or caption_edges
         winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
         selected_side[table_id] = str(winner["direction"])
+        selected_orientation_anchor[table_id] = regions_by_id[str(winner["region_id"])]
 
     return [
         edge
         for edge in edges
         if edge["proposed_role"] != "caption"
-        or edge["direction"] == selected_side.get(str(edge["table_region_id"]))
+        or (
+            edge["direction"] == selected_side.get(str(edge["table_region_id"]))
+            and compatible_orientation(
+                regions_by_id[str(edge["region_id"])],
+                selected_orientation_anchor[str(edge["table_region_id"])],
+            )
+            is not False
+        )
     ]
 
 
@@ -565,8 +627,16 @@ def _reference_fragment_edge(
     """Join a Text table-number fragment to a Caption without merging geometry."""
     if candidate.get("type") not in {"Text", "List"} or member.get("type") != "Caption":
         return None
-    reference = find_table_reference_mention(candidate.get("text"))
+    reference = parse_semantic_caption_reference(
+        candidate.get("text"), allow_ocr_tolerance=True
+    )
     if not reference:
+        return None
+    negative_reasons = body_reference_evidence(candidate.get("text"))
+    if negative_reasons:
+        return None
+    orientation_compatible = compatible_orientation(candidate, member)
+    if orientation_compatible is False:
         return None
     cb = list(map(float, candidate["bbox_px"]))
     mb = list(map(float, member["bbox_px"]))
@@ -581,30 +651,37 @@ def _reference_fragment_edge(
     }
     same_side = side_checks.get(caption_side, False)
 
-    if same_side and caption_side in {"left", "right"}:
-        cross_gap = max(0.0, max(cb[0], mb[0]) - min(cb[2], mb[2])) / page_width
-        parallel_overlap = _vertical_overlap_ratio(cb, mb)
-        axis_gap = max(0.0, max(cb[1], mb[1]) - min(cb[3], mb[3])) / page_height
-        lane_overlap = _overlap_ratio(cb, mb)
-        # Rotated text flows along the page Y axis. A short Table-number box may
-        # therefore continue the top/bottom end of a tall Caption without any
-        # vertical overlap at all. Accept either side-by-side parallel overlap or
-        # a close, collinear continuation along that rotated reading axis.
-        parallel = cross_gap <= 0.035 and parallel_overlap >= 0.30
-        collinear = axis_gap <= 0.035 and lane_overlap >= 0.30
-        if not (parallel or collinear):
-            return None
-        gap = min(cross_gap if parallel else 1.0, axis_gap if collinear else 1.0)
-        alignment = max(
-            parallel_overlap if parallel else 0.0, lane_overlap if collinear else 0.0
-        )
-        orientation_relation = (
-            "parallel_overlap" if parallel else "rotated_axis_continuation"
-        )
-    elif same_side:
-        gap = max(0.0, max(cb[1], mb[1]) - min(cb[3], mb[3])) / page_height
-        alignment = _overlap_ratio(cb, mb)
-        orientation_relation = "normal_axis_continuation"
+    if same_side:
+        orientation = region_orientation(member)
+        angle = orientation["angle_degrees"]
+        if angle is None:
+            angle = region_orientation(candidate)["angle_degrees"] or 0.0
+        relation = local_relation(cb, mb, angle)
+        scale = max(1.0, (page_width**2 + page_height**2) ** 0.5)
+        gap = float(relation["gap"]) / scale
+        alignment = float(relation["overlap"])
+        orientation_relation = "normalized_axis_continuation"
+        # Detector fragments at a caption boundary frequently overlap by a few
+        # pixels on both local axes.  Such boxes have no strict before/after
+        # relation, but are still one continuous external caption lane.  Measure
+        # both local-axis overlaps rather than dropping the semantic identifier.
+        if relation["side"] is None:
+            local_candidate = project_bbox(cb, angle)
+            local_member = project_bbox(mb, angle)
+            inline_overlap = interval_overlap_ratio(
+                local_candidate.inline_min,
+                local_candidate.inline_max,
+                local_member.inline_min,
+                local_member.inline_max,
+            )
+            block_overlap = interval_overlap_ratio(
+                local_candidate.block_min,
+                local_candidate.block_max,
+                local_member.block_min,
+                local_member.block_max,
+            )
+            alignment = max(inline_overlap, block_overlap)
+            orientation_relation = "normalized_boundary_overlap"
     else:
         opposite_long_sides = (
             caption_side == "left"
@@ -643,7 +720,12 @@ def _reference_fragment_edge(
             "gap_page_ratio": round(gap, 6),
             "parallel_overlap_ratio": round(alignment, 6),
             "orientation_relation": orientation_relation,
+            "orientation_compatible": orientation_compatible,
+            "candidate_orientation": region_orientation(candidate),
+            "caption_orientation": region_orientation(member),
+            "geometry_space": "table_local_orientation",
             "crosses_table": not same_side,
+            "negative_reasons": negative_reasons,
             "preserve_separate_geometry": True,
         },
     }
@@ -1081,5 +1163,24 @@ def associate_table_context(
                 "fragment_region_ids": list(group["caption_region_ids"]),
                 "source_geometry_preserved": True,
             }
+            orientation_members = [
+                region_by_id[region_id]
+                for region_id in dict.fromkeys(
+                    group["identifier_region_ids"] + group["caption_region_ids"]
+                )
+            ]
+            group["caption_orientation"] = next(
+                (
+                    region_orientation(region)
+                    for region in orientation_members
+                    if region_orientation(region)["angle_degrees"] is not None
+                ),
+                {"angle_degrees": None, "confidence": 0.0, "source": "unknown"},
+            )
+            group["relationship_coordinate_space"] = (
+                "table_local_orientation"
+                if group["caption_orientation"]["angle_degrees"] is not None
+                else "page_axes_fallback"
+            )
             groups.append(group)
     return groups
