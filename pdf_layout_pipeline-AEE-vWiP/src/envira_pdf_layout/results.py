@@ -88,6 +88,13 @@ def figure_completion_geometry_summary_dataframe(run):
     ]
 
 
+def figure_decomposition_proposals_dataframe(run):
+    """Return accepted and preserved oversized-Figure decomposition hypotheses."""
+    return pd.DataFrame(
+        run.diagnostics.get("figure_decomposition", {}).get("proposals", [])
+    )
+
+
 def layout_relationships_dataframe(run):
     """Return every generalized duplicate, hierarchy, conflict, and association edge."""
     return pd.DataFrame(run.layout_relationships)
