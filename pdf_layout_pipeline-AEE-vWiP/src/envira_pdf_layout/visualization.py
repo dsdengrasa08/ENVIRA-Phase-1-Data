@@ -21,6 +21,7 @@ _COLORS = {
     "List": (255, 120, 0),
     "Table": (0, 140, 255),
     "Formula": (0, 255, 255),
+    "Equation": (0, 255, 255),
     "Caption": (180, 0, 180),
     "Footnote": (120, 120, 0),
     "Reference": (80, 180, 80),
@@ -350,6 +351,24 @@ def render_overlap_resolution_overlay(
             p = (int((pb[0] + pb[2]) / 2), int((pb[1] + pb[3]) / 2))
             c = (int((cb[0] + cb[2]) / 2), int((cb[1] + cb[3]) / 2))
             cv2.arrowedLine(image, p, c, (220, 120, 20), 1, cv2.LINE_AA, tipLength=0.08)
+        else:
+            left = resolved.get(str(relationship.get("left_region_id")))
+            right = resolved.get(str(relationship.get("right_region_id")))
+            if left and right and relationship.get("kind") in {
+                "CLASS_CONFLICT",
+                "AMBIGUOUS_OVERLAP",
+                "FORMULA_TEXT_BOUNDARY_RESOLVED",
+                "CROSS_CLASS_DETECTION_SUPPRESSED",
+            }:
+                lb, rb = left["bbox_px"], right["bbox_px"]
+                start = (int((lb[0] + lb[2]) / 2), int((lb[1] + lb[3]) / 2))
+                end = (int((rb[0] + rb[2]) / 2), int((rb[1] + rb[3]) / 2))
+                color = (
+                    (40, 180, 40)
+                    if relationship.get("status") == "resolved_cross_class_conflict"
+                    else (0, 150, 255)
+                )
+                cv2.line(image, start, end, color, 1, cv2.LINE_AA)
     _label(image, f"Overlap resolution | page {page_number}", (24, 36), (0, 0, 255))
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)

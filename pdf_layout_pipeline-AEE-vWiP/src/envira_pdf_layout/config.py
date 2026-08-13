@@ -242,6 +242,17 @@ class OverlapResolutionConfig:
     fragment_max_gap_page_ratio: float = 0.012
     boundary_overlap_ratio: float = 0.20
     preserve_authoritative_nested_regions: bool = True
+    resolve_formula_text_conflicts: bool = True
+    formula_min_coverage: float = 0.55
+    formula_min_horizontal_coverage: float = 0.45
+    formula_block_min_width_page_ratio: float = 0.08
+    formula_inline_max_height_page_ratio: float = 0.018
+    formula_boundary_band_ratio: float = 0.35
+    formula_split_min_fragment_height_page_ratio: float = 0.006
+    formula_split_min_fragment_area_page_ratio: float = 0.0002
+    formula_protection_padding_page_ratio: float = 0.001
+    cross_class_min_survivor_score: float = 0.80
+    cross_class_score_margin: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -726,6 +737,20 @@ class PipelineConfig:
             "duplicate_area_ratio",
             "fragment_horizontal_overlap",
             "boundary_overlap_ratio",
+        ):
+            if not 0 <= getattr(generalized, name) <= 1:
+                raise ValueError(f"overlap resolution {name} must be in [0, 1]")
+        for name in (
+            "formula_min_coverage",
+            "formula_min_horizontal_coverage",
+            "formula_block_min_width_page_ratio",
+            "formula_inline_max_height_page_ratio",
+            "formula_boundary_band_ratio",
+            "formula_split_min_fragment_height_page_ratio",
+            "formula_split_min_fragment_area_page_ratio",
+            "formula_protection_padding_page_ratio",
+            "cross_class_min_survivor_score",
+            "cross_class_score_margin",
         ):
             if not 0 <= getattr(generalized, name) <= 1:
                 raise ValueError(f"overlap resolution {name} must be in [0, 1]")
