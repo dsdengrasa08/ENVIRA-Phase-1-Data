@@ -58,6 +58,8 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
             label = f"{r.get('visual_overlay_order', '')} {typ}".strip()
         if r.get("synthetic_detection_method") == "caption_anchored_figure_completion":
             label += " [completed]"
+        elif r.get("synthetic_detection_method") == "caption_visual_figure_decomposition":
+            label += " [decomposed]"
         _label(image, label, (x0 + 4, max(18, y0 + 18)), color)
     _label(
         image,
@@ -172,6 +174,35 @@ def render_raw_detection_overlays(run, save=True):
         )
         for page in run.pages
     ]
+
+
+def render_figure_decomposition_overlay(
+    run, page_number, output_path: Path | None = None
+):
+    """Show source boxes, proposed children, and accepted/rejected decisions."""
+    import cv2
+
+    page = next(p for p in run.pages if int(p["page_number"]) == int(page_number))
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    proposals = run.diagnostics.get("figure_decomposition", {}).get("proposals", [])
+    for proposal in proposals:
+        if int(proposal["page_number"]) != int(page_number):
+            continue
+        source = int_bbox(tuple(proposal["source_bbox_px"]))
+        accepted = proposal["decision"] == "accepted"
+        color = (0, 180, 0) if accepted else (0, 150, 255)
+        cv2.rectangle(image, source[:2], source[2:], (160, 160, 160), 2, cv2.LINE_AA)
+        for box in proposal.get("proposed_bbox_px", []):
+            child = int_bbox(tuple(box))
+            cv2.rectangle(image, child[:2], child[2:], color, 3, cv2.LINE_AA)
+        _label(image, proposal["decision"], (source[0] + 3, max(18, source[1] + 16)), color)
+    _label(image, f"Figure decomposition | page {page_number}", (24, 36), (0, 0, 255))
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
 
 
 def render_resolved_layout_overlays(run, save=True):
