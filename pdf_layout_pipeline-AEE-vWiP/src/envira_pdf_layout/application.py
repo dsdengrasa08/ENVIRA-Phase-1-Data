@@ -7,7 +7,10 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from time import monotonic
+import traceback
 from typing import Any
+from uuid import uuid4
 
 from .artifact_validation import validate_exported_artifacts
 from .config import PipelineConfig
@@ -58,6 +61,10 @@ def run_pdf(
     config: PipelineConfig | None = None,
     overwrite: bool = False,
     resume: bool = False,
+    event_sink: Any | None = None,
+    cancellation_token: Any | None = None,
+    attempt: int = 1,
+    parent_run_id: str | None = None,
 ) -> PipelineRunSummary:
     """Run validation, conversion, processing, export, and post-export validation."""
     if overwrite and resume:
@@ -84,6 +91,12 @@ def run_pdf(
         ),
     )
     config.validate()
+    root.mkdir(parents=True, exist_ok=True)
+    free_bytes = shutil.disk_usage(root).free
+    if free_bytes < config.operational.minimum_free_disk_bytes:
+        raise InputPDFError(
+            f"free disk {free_bytes} is below operational.minimum_free_disk_bytes"
+        )
 
     # Heavy imports and model initialization are intentionally below the file checks.
     from .docling_backend import DoclingBackend
@@ -98,7 +111,38 @@ def run_pdf(
     prepare_runtime(config.runtime)
     document = prepare_document_context(config)
     target = document.artifacts.document_dir
-    terminal = [target / name for name in ("_SUCCESS", "_PARTIAL", "_FAILED")]
+    from .observability import (
+        CancellationToken,
+        EventRecorder,
+        RunCancelled,
+        RunContext,
+        bind_observability,
+        metric_snapshot,
+        reset_observability,
+    )
+
+    run_id = config.document.run_id or uuid4().hex
+    context = RunContext(
+        run_id=run_id,
+        document_id=document.doc_id,
+        source_pdf_sha256=document.pdf_sha256,
+        effective_config_sha256=effective_config_sha256(config),
+        attempt=attempt,
+        parent_run_id=parent_run_id,
+    )
+    deadline = (
+        monotonic() + config.operational.total_run_timeout_seconds
+        if config.operational.total_run_timeout_seconds
+        else None
+    )
+    cancellation = cancellation_token or CancellationToken(deadline_monotonic=deadline)
+    recorder = EventRecorder(
+        context,
+        event_sink,
+        target / "run_events.jsonl",
+        config.security.secure_file_mode,
+    )
+    terminal = [target / name for name in ("_SUCCESS", "_PARTIAL", "_FAILED", "_CANCELLED")]
     if any(path.exists() for path in terminal):
         if resume:
             return _resume_summary(document, config)
@@ -125,20 +169,33 @@ def run_pdf(
         sentinel.write_text(document.doc_id + "\n", encoding="utf-8")
         secure_file(sentinel, config.security.secure_file_mode)
 
+    tokens = bind_observability(recorder, cancellation)
     try:
+        cancellation.check()
+        recorder.emit("run_started", status="running")
         try:
             models = ensure_model_artifacts(config.docling)
         except FileNotFoundError as exc:
             raise DependencyUnavailableError(str(exc)) from exc
+        recorder.emit("models_validated", status="completed", counters={"model_cache_bytes": int(models["size_mb"] * 1024 * 1024)})
+        cancellation.check()
         pages = prepare_pages(document, config.document.render_dpi)
+        recorder.emit("pages_rendered", status="completed", counters={"pages_total": len(pages.pages)})
         backend = DoclingBackend.from_config(
             config.docling, models["artifact_path"], config.security
         )
+        recorder.emit("backend_conversion_started", stage="backend_conversion", status="running")
+        conversion_started = monotonic()
         conversion = backend.convert(
             document.pdf_path, (document.page_start, document.page_end)
         )
+        recorder.emit("backend_conversion_completed", stage="backend_conversion", status="completed", elapsed_ms=(monotonic() - conversion_started) * 1000)
+        cancellation.check()
         result = run_layout_pipeline(conversion, pages, config)
         result.diagnostics["application"] = {
+            "run_id": run_id,
+            "attempt": attempt,
+            "parent_run_id": parent_run_id,
             "effective_config_sha256": effective_config_sha256(config),
             "source_pdf_bytes": source.stat().st_size,
             "source_pdf_sha256": document.pdf_sha256,
@@ -153,15 +210,25 @@ def run_pdf(
             capabilities=backend.capabilities,
         )
         result.diagnostics["environment_fingerprint"] = fingerprint
+        result.diagnostics["operational_metrics"] = metric_snapshot(recorder.events)
         for stage in result.stage_trace:
             stage["environment_sha256"] = fingerprint["environment_sha256"]
+            stage["run_id"] = run_id
+            stage["document_id"] = document.doc_id
+            stage["attempt"] = attempt
+        recorder.emit("export_started", status="running")
         export_pipeline_result(result)
         validation = validate_exported_artifacts(target, config.security)
+        recorder.emit("artifact_validation_completed", status="completed" if validation["valid"] else "failed", counters={"validation_errors_total": len(validation.get("errors", []))})
         if not validation["valid"]:
             raise ArtifactValidationError(
                 f"artifact validation failed: {validation['errors']}"
             )
-        mark_manifest_validated(document.artifacts.artifact_manifest_json)
+        recorder.emit("run_completed", status=result.status)
+        mark_manifest_validated(
+            document.artifacts.artifact_manifest_json,
+            operational_files=[target / "run_events.jsonl"],
+        )
         return PipelineRunSummary(
             result.status,
             document.doc_id,
@@ -169,7 +236,18 @@ def run_pdf(
             document.artifacts.artifact_manifest_json,
             validation,
         )
-    except BaseException:
+    except RunCancelled as exc:
+        recorder.emit("run_cancelled", status="cancelled", issue={"category": "cancellation", "message": str(exc), "exception_type": type(exc).__name__})
+        _write_failure(target, context, exc, "cancelled", config)
+        for path in terminal:
+            path.unlink(missing_ok=True)
+        (target / "_CANCELLED").write_text("cancelled\n", encoding="utf-8")
+        secure_file(target / "_CANCELLED", config.security.secure_file_mode)
+        raise
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        recorder.emit("run_failed", status="failed", issue={"category": "application_failure", "message": "pipeline execution failed", "exception_type": type(exc).__name__})
         if not config.privacy.retain_failed_artifacts and target.exists():
             shutil.rmtree(target)
             secure_directory(target, config.security.secure_directory_mode)
@@ -177,9 +255,48 @@ def run_pdf(
             (target / "_EXPORTING").unlink(missing_ok=True)
             for path in terminal:
                 path.unlink(missing_ok=True)
+        _persist_events(recorder)
+        _write_failure(target, context, exc, "failed", config)
         (target / "_FAILED").write_text("failed\n", encoding="utf-8")
         secure_file(target / "_FAILED", config.security.secure_file_mode)
         raise
+    finally:
+        reset_observability(tokens)
+
+
+def _write_failure(target: Path, context: Any, exc: Exception, status: str, config: PipelineConfig) -> None:
+    from .security import redact_secrets
+
+    payload = {
+        "failure_schema_version": 1,
+        "status": status,
+        "run_id": context.run_id,
+        "document_id": context.document_id,
+        "source_pdf_sha256": context.source_pdf_sha256,
+        "effective_config_sha256": context.effective_config_sha256,
+        "attempt": context.attempt,
+        "parent_run_id": context.parent_run_id,
+        "exception_type": type(exc).__name__,
+        "message": "pipeline execution failed" if status == "failed" else str(exc),
+    }
+    if config.operational.retain_private_traceback:
+        payload["private_traceback"] = traceback.format_exc()
+    temporary = target / "run_failure.json.tmp"
+    temporary.write_text(json.dumps(redact_secrets(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(target / "run_failure.json")
+    secure_file(target / "run_failure.json", config.security.secure_file_mode)
+
+
+def _persist_events(recorder: Any) -> None:
+    if not recorder.output:
+        return
+    temporary = recorder.output.with_name(recorder.output.name + ".tmp")
+    temporary.write_text(
+        "".join(json.dumps(row, sort_keys=True, default=str) + "\n" for row in recorder.events),
+        encoding="utf-8",
+    )
+    temporary.replace(recorder.output)
+    secure_file(recorder.output, recorder.file_mode)
 
 
 def _resume_summary(document: Any, config: PipelineConfig) -> PipelineRunSummary:

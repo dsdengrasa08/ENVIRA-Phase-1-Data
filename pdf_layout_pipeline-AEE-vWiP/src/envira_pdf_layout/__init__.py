@@ -12,11 +12,16 @@ from .pipeline import run_layout_pipeline
 from .types import PipelineResult
 from .application import PipelineRunSummary, run_pdf
 from .artifact_validation import validate_exported_artifacts as validate_artifacts
+from .observability import CancellationToken, EventRecorder, RunCancelled, RunContext
 
 __all__ = [
     "PipelineConfig",
     "PipelineResult",
     "PipelineRunSummary",
+    "CancellationToken",
+    "EventRecorder",
+    "RunCancelled",
+    "RunContext",
     "run_layout_pipeline",
     "run_pdf",
     "validate_artifacts",

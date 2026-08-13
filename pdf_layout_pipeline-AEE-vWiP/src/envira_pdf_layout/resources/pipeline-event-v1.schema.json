@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ENVIRA pipeline lifecycle event v1",
+  "type": "object",
+  "required": ["event_schema_version", "event", "timestamp_utc", "run_id", "document_id", "attempt"],
+  "properties": {
+    "event_schema_version": {"const": 1},
+    "event": {"type": "string"},
+    "timestamp_utc": {"type": "string", "format": "date-time"},
+    "run_id": {"type": "string", "minLength": 1},
+    "document_id": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "elapsed_ms": {"type": ["number", "null"], "minimum": 0},
+    "counters": {"type": "object", "additionalProperties": {"type": "number"}}
+  }
+}

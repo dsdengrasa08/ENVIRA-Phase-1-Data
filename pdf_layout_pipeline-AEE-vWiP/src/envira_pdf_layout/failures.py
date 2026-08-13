@@ -19,6 +19,9 @@ class PipelineIssue:
     region_ids: tuple[str, ...] = ()
     retryable: bool = False
     exception_type: str | None = None
+    run_id: str | None = None
+    document_id: str | None = None
+    attempt: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -52,11 +55,21 @@ def execute_stage(
 ) -> StageExecution[T]:
     """Execute one package-owned stage with explicit strict/report semantics."""
     started = perf_counter()
+    from .observability import RunCancelled, check_cancellation, current_recorder
+
+    check_cancellation()
+    recorder = current_recorder()
+    if recorder:
+        recorder.emit("stage_started", stage=name, status="running")
     try:
-        return StageExecution(
+        result = StageExecution(
             operation(), "completed", (perf_counter() - started) * 1000
         )
-    except (KeyboardInterrupt, SystemExit):
+        check_cancellation()
+        if recorder:
+            recorder.emit("stage_completed", stage=name, status=result.status, elapsed_ms=result.elapsed_ms)
+        return result
+    except (KeyboardInterrupt, SystemExit, RunCancelled):
         raise
     except Exception as exc:
         issue = PipelineIssue(
@@ -66,16 +79,24 @@ def execute_stage(
             message=str(exc) or type(exc).__name__,
             retryable=False,
             exception_type=type(exc).__name__,
+            run_id=recorder.context.run_id if recorder else None,
+            document_id=recorder.context.document_id if recorder else None,
+            attempt=recorder.context.attempt if recorder else None,
         )
         if mode == "strict":
+            if recorder:
+                recorder.emit("stage_failed", stage=name, status="failed", elapsed_ms=(perf_counter() - started) * 1000, issue=issue.to_dict())
             raise PipelineStageError(issue) from exc
-        return StageExecution(
+        result = StageExecution(
             fallback(),
             "failed_recovered",
             (perf_counter() - started) * 1000,
             issue,
             fallback_name,
         )
+        if recorder:
+            recorder.emit("stage_recovered", stage=name, status=result.status, elapsed_ms=result.elapsed_ms, issue=issue.to_dict())
+        return result
 
 
 def derive_run_status(issues: list[PipelineIssue], failed_pages: list[int]) -> str:

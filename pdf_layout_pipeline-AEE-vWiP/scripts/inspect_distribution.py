@@ -11,6 +11,8 @@ REQUIRED = {
     "envira_pdf_layout/resources/layout-region-v1.schema.json",
     "envira_pdf_layout/resources/artifact-manifest-v1.schema.json",
     "envira_pdf_layout/resources/model-manifest-v1.schema.json",
+    "envira_pdf_layout/resources/pipeline-event-v1.schema.json",
+    "envira_pdf_layout/resources/run-failure-v1.schema.json",
 }
 FORBIDDEN_SUFFIXES = {".ipynb", ".pdf", ".env", ".pyc"}
 

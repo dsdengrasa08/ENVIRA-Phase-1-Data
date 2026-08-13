@@ -10,6 +10,10 @@ docling:
   # One-time trust-on-first-use migration for pre-manifest Colab model caches.
   bootstrap_legacy_model_manifest: true
   model_download_timeout_seconds: 900
+operational:
+  total_run_timeout_seconds: null
+  minimum_free_disk_bytes: 1000000000
+  retain_private_traceback: false
 page1:
   abstract_aliases: [Abstract, Summary]
 headers:

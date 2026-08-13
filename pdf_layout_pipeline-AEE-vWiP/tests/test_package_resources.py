@@ -10,3 +10,5 @@ def test_installed_default_profile_and_schemas_are_package_resources():
     assert json.loads(root.joinpath("layout-region-v1.schema.json").read_text())["properties"]["region_schema_version"]["const"] == 1
     assert json.loads(root.joinpath("artifact-manifest-v1.schema.json").read_text())["properties"]["schema_version"]["const"] == 1
     assert json.loads(root.joinpath("model-manifest-v1.schema.json").read_text())["properties"]["model_manifest_schema_version"]["const"] == 1
+    assert json.loads(root.joinpath("pipeline-event-v1.schema.json").read_text())["properties"]["event_schema_version"]["const"] == 1
+    assert json.loads(root.joinpath("run-failure-v1.schema.json").read_text())["properties"]["failure_schema_version"]["const"] == 1

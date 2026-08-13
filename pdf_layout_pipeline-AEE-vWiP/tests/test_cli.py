@@ -1,7 +1,8 @@
 import json
 
 from envira_pdf_layout import __version__
-from envira_pdf_layout.cli import EXIT_ARTIFACT, EXIT_CONFIG, main
+from envira_pdf_layout.cli import EXIT_ARTIFACT, EXIT_CANCELLED, EXIT_CONFIG, main
+from envira_pdf_layout.observability import RunCancelled
 
 
 def test_cli_version_and_help_do_not_initialize_models(capsys):
@@ -36,3 +37,11 @@ def test_compare_exit_code_reflects_trace_compatibility(tmp_path, capsys):
     )
     assert main(["compare", str(trace), str(trace)]) == 0
     assert json.loads(capsys.readouterr().out)["compatible"] is True
+
+
+def test_cancelled_run_has_stable_exit_code(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "input.pdf"
+    source.write_bytes(b"%PDF-")
+    monkeypatch.setattr("envira_pdf_layout.cli.run_pdf", lambda *args, **kwargs: (_ for _ in ()).throw(RunCancelled("cancelled")))
+    assert main(["run", str(source), "--output-dir", str(tmp_path / "out")]) == EXIT_CANCELLED
+    assert json.loads(capsys.readouterr().err)["exit_code"] == EXIT_CANCELLED

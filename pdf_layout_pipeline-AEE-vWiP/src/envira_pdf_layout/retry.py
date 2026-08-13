@@ -25,6 +25,8 @@ def build_retry_plan(
         .splitlines()
         if line.strip()
     ]
+    manifest_path = run_dir / "artifact_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
     recorded_hash = diagnostics.get("document", {}).get("pdf_hash")
     if recorded_hash is not None and recorded_hash != expected_pdf_hash:
         raise ValueError("input PDF hash differs from the failed run")
@@ -38,4 +40,6 @@ def build_retry_plan(
         "pdf_hash": expected_pdf_hash,
         "failed_pages": failed_pages,
         "retryable": bool(failed_pages),
+        "parent_run_id": manifest.get("run_id"),
+        "attempt": int(manifest.get("attempt", 1)) + 1,
     }

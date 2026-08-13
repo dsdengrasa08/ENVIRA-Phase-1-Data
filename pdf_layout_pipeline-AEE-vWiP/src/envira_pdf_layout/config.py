@@ -297,6 +297,15 @@ class ErrorPolicyConfig:
 
 
 @dataclass(frozen=True)
+class OperationalConfig:
+    """Bounded runtime and preflight policy; telemetry remains vendor-neutral."""
+
+    total_run_timeout_seconds: int | None = None
+    minimum_free_disk_bytes: int = 1_000_000_000
+    retain_private_traceback: bool = False
+
+
+@dataclass(frozen=True)
 class CoreConfig:
     """Controlled strangler rollout for the preserved core implementation."""
 
@@ -355,6 +364,7 @@ class PipelineConfig:
     security: SecurityConfig = field(default_factory=SecurityConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     error_policy: ErrorPolicyConfig = field(default_factory=ErrorPolicyConfig)
+    operational: OperationalConfig = field(default_factory=OperationalConfig)
     core: CoreConfig = field(default_factory=CoreConfig)
     heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
     content_policy: ContentPolicyConfig = field(default_factory=ContentPolicyConfig)
@@ -393,6 +403,7 @@ class PipelineConfig:
             "security": SecurityConfig,
             "privacy": PrivacyConfig,
             "error_policy": ErrorPolicyConfig,
+            "operational": OperationalConfig,
             "core": CoreConfig,
             "heuristics": HeuristicProfileConfig,
             "content_policy": ContentPolicyConfig,
@@ -577,6 +588,13 @@ class PipelineConfig:
             raise ValueError("docling min_model_size_mb must be non-negative")
         if self.docling.model_download_timeout_seconds < 1:
             raise ValueError("docling.model_download_timeout_seconds must be positive")
+        if self.operational.minimum_free_disk_bytes < 0:
+            raise ValueError("operational.minimum_free_disk_bytes must be non-negative")
+        if (
+            self.operational.total_run_timeout_seconds is not None
+            and self.operational.total_run_timeout_seconds < 1
+        ):
+            raise ValueError("operational.total_run_timeout_seconds must be positive")
         if self.docling.auto_download_models and self.security.allow_remote_services is False:
             raise ValueError(
                 "docling.auto_download_models requires security.allow_remote_services"

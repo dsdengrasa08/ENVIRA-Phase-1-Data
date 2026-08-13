@@ -13,7 +13,12 @@ from .artifact_validation import validate_exported_artifacts
 from .config import PipelineConfig
 from .regression import load_trace
 from .stage_trace import compare_stage_traces
-from .application import ArtifactValidationError, DependencyUnavailableError, InputPDFError
+from .application import (
+    ArtifactValidationError,
+    DependencyUnavailableError,
+    InputPDFError,
+    run_pdf,
+)
 
 EXIT_CONFIG = 2
 EXIT_INPUT = 3
@@ -21,6 +26,7 @@ EXIT_DEPENDENCY = 4
 EXIT_PARTIAL = 5
 EXIT_PIPELINE = 6
 EXIT_ARTIFACT = 7
+EXIT_CANCELLED = 8
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
     commands.add_parser("resources", help="show installed resource paths")
+    doctor = commands.add_parser("doctor", help="run dependency, model, and resource preflight checks")
+    doctor.add_argument("--config", type=Path)
     return parser
 
 
@@ -69,6 +77,12 @@ def main(argv: list[str] | None = None) -> int:
             root = files("envira_pdf_layout").joinpath("resources")
             _emit({"default_config": str(root.joinpath("default.yaml")), "schemas": str(root)})
             return 0
+        if args.command == "doctor":
+            from .doctor import run_doctor
+
+            result = run_doctor(PipelineConfig.load(args.config))
+            _emit(result)
+            return 0 if result["healthy"] else EXIT_DEPENDENCY
         overrides = {}
         if args.page_start is not None:
             overrides["page_start"] = args.page_start
@@ -92,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
         return _error(exc, EXIT_INPUT, args.debug)
     except (ImportError, ModuleNotFoundError) as exc:
         return _error(exc, EXIT_DEPENDENCY, args.debug)
+    except _cancelled_error() as exc:
+        return _error(exc, EXIT_CANCELLED, args.debug)
     except Exception as exc:
         return _error(exc, EXIT_PIPELINE, args.debug)
 
@@ -105,6 +121,12 @@ def _error(exc: Exception, code: int, debug: bool) -> int:
         raise
     print(json.dumps({"status": "error", "exit_code": code, "error": str(exc)}), file=sys.stderr)
     return code
+
+
+def _cancelled_error():
+    from .observability import RunCancelled
+
+    return RunCancelled
 
 
 if __name__ == "__main__":

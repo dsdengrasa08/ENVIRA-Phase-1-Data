@@ -31,9 +31,23 @@ from .schema import initialize_region_schema, normalize_relationship_schema
 
 def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
+    from .observability import check_cancellation, current_recorder
+
+    recorder = current_recorder()
+    check_cancellation()
+    if recorder:
+        recorder.emit("stage_started", stage="independent_core", status="running")
     started = perf_counter()
     result = run_independent_core(conversion, page_set, config)
     _collect_core_page_failures(result, config)
+    if recorder:
+        for page_number in result.failed_pages:
+            recorder.emit(
+                "page_failed",
+                stage="independent_core",
+                page_number=int(page_number),
+                status="failed",
+            )
     page_map = {int(page["page_number"]): page for page in result.pages}
     for collection in (result.raw_regions, result.final_regions):
         for region in collection:
@@ -46,6 +60,13 @@ def run_layout_pipeline(conversion, page_set, config):
         elapsed_ms=(perf_counter() - started) * 1000,
     )
     result.stage_trace = [core_snapshot]
+    if recorder:
+        recorder.emit(
+            "stage_completed",
+            stage="independent_core",
+            status="completed",
+            elapsed_ms=core_snapshot["elapsed_ms"],
+        )
     result.filtered_regions = result.final_regions
     result.diagnostics["effective_config"] = config.to_dict()
     result.diagnostics["document"] = {
@@ -236,26 +257,6 @@ def run_layout_pipeline(conversion, page_set, config):
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
         "work": resolution.diagnostics,
-    }
-    previous_ids = {
-        str(decision.get("region_id"))
-        for decision in result.diagnostics.get("nested_assets", {}).get("decisions", [])
-        if decision.get("region_id")
-    }
-    proposal_ids = {str(proposal["child_region_id"]) for proposal in proposals}
-    result.diagnostics["nested_hierarchy"] = {
-        **hierarchy.diagnostics,
-        "relationships": hierarchy.relationships,
-        "decisions": hierarchy.decisions,
-        "top_level_count": len(result.top_level_regions),
-        "nested_count": len(result.nested_regions),
-        "legacy_comparison": {
-            "previous_candidate_ids": sorted(previous_ids),
-            "current_candidate_ids": sorted(proposal_ids),
-            "matched_ids": sorted(previous_ids & proposal_ids),
-            "missing_from_current_ids": sorted(previous_ids - proposal_ids),
-            "new_candidate_ids": sorted(proposal_ids - previous_ids),
-        },
     }
     previous_ids = {
         str(decision.get("region_id"))

@@ -38,7 +38,7 @@ def _write_text(path, value, mode=0o600):
 def export_pipeline_result(run):
     paths = run.document.artifacts
     export_started = datetime.now(timezone.utc)
-    for marker_name in ("_SUCCESS", "_PARTIAL", "_FAILED"):
+    for marker_name in ("_SUCCESS", "_PARTIAL", "_FAILED", "_CANCELLED"):
         (paths.document_dir / marker_name).unlink(missing_ok=True)
     publishing_marker = paths.document_dir / "_EXPORTING"
     _write_text(publishing_marker, export_started.isoformat() + "\n")
@@ -148,7 +148,9 @@ def export_pipeline_result(run):
     manifest_path = paths.artifact_manifest_json
     manifest = {
         "schema_version": 1,
-        "run_id": effective_config.get("document", {}).get("run_id") or run.document.doc_id,
+        "run_id": run.diagnostics.get("application", {}).get("run_id") or run.document.doc_id,
+        "attempt": run.diagnostics.get("application", {}).get("attempt", 1),
+        "parent_run_id": run.diagnostics.get("application", {}).get("parent_run_id"),
         "attempt_id": str(uuid4()),
         "run_status": run.status,
         "artifacts_complete": run.status in {"complete", "complete_with_warnings"},
@@ -215,11 +217,22 @@ def _artifact_sensitivity(path):
     return "derived_sensitive"
 
 
-def mark_manifest_validated(path):
+def mark_manifest_validated(path, operational_files=()):
     """Mark post-export validation without changing any hashed payload artifact."""
     value = json.loads(path.read_text(encoding="utf-8"))
     value["artifact_validation_passed"] = True
     value["validated_at"] = datetime.now(timezone.utc).isoformat()
+    known = {item["path"] for item in value.get("files", [])}
+    for artifact in operational_files:
+        if artifact.is_file() and artifact.name not in known:
+            value.setdefault("files", []).append(
+                {
+                    "path": artifact.name,
+                    "bytes": artifact.stat().st_size,
+                    "sha256": sha256_file(artifact),
+                    "sensitivity": "operational_metadata",
+                }
+            )
     _write_text(path, json.dumps(value, indent=2) + "\n")
 
 
@@ -242,6 +255,9 @@ def _page_diagnostics(run):
     return [
         {
             "schema_version": 1,
+            "run_id": run.diagnostics.get("application", {}).get("run_id"),
+            "document_id": run.document.doc_id,
+            "attempt": run.diagnostics.get("application", {}).get("attempt", 1),
             "page_number": int(page["page_number"]),
             "status": "failed"
             if int(page["page_number"]) in run.failed_pages

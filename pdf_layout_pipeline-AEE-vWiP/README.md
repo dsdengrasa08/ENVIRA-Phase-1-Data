@@ -35,11 +35,13 @@ envira-pdf-layout config --effective --config config/default.yaml
 envira-pdf-layout run input.pdf --output-dir ./runs --config config/default.yaml
 envira-pdf-layout validate ./runs/outputs/docling_layout_only/DOCUMENT_ID
 envira-pdf-layout compare baseline.jsonl candidate.jsonl
+envira-pdf-layout doctor --config config/default.yaml
 ```
 
 CLI output is JSON. Exit codes are `0` for complete results, `2` for invalid
 configuration, `3` for invalid input, `4` for unavailable dependencies, `5` for
-an exported partial result, `6` for pipeline failure, and `7` for invalid artifacts.
+an exported partial result, `6` for pipeline failure, `7` for invalid artifacts,
+and `8` for cooperative cancellation or a run deadline.
 Existing terminal runs are refused by default. `--overwrite` starts a new attempt;
 `--resume` only reuses an artifact set whose source hash, effective-config hash, and
 manifest validation match. Export removes stale terminal markers before publication,
@@ -49,6 +51,8 @@ Security limits, private file modes, secret redaction, raw-content controls, and
 untrusted-input deployment model are documented in [`SECURITY.md`](SECURITY.md).
 Dependency locking, clean-wheel verification, model manifests, SBOMs, and runtime
 fingerprints are documented in [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md).
+Lifecycle events, cancellation, failure reports, preflight checks, metrics, and
+service-level indicators are documented in [`OBSERVABILITY.md`](OBSERVABILITY.md).
 
 The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the

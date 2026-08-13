@@ -17,6 +17,10 @@ def test_application_api_is_file_oriented_and_public():
         "config",
         "overwrite",
         "resume",
+        "event_sink",
+        "cancellation_token",
+        "attempt",
+        "parent_run_id",
     ]
     assert callable(run_layout_pipeline)
     assert callable(validate_artifacts)
@@ -33,6 +37,40 @@ def test_application_rejects_non_pdf_before_model_initialization(tmp_path):
 def test_application_requires_an_existing_input(tmp_path):
     with pytest.raises(FileNotFoundError, match="PDF not found"):
         run_pdf(tmp_path / "missing.pdf", tmp_path / "output")
+
+
+def test_application_checks_free_disk_before_model_initialization(tmp_path, monkeypatch):
+    source = tmp_path / "input.pdf"
+    source.write_bytes(b"%PDF-")
+    config = PipelineConfig.load(
+        environ={}, operational={"minimum_free_disk_bytes": 10**30}
+    )
+    monkeypatch.setattr(application.shutil, "disk_usage", lambda _: SimpleNamespace(free=1))
+    with pytest.raises(InputPDFError, match="free disk"):
+        run_pdf(source, tmp_path / "output", config=config)
+
+
+def test_failure_report_is_sanitized_and_atomic(tmp_path):
+    context = SimpleNamespace(
+        run_id="run",
+        document_id="doc",
+        source_pdf_sha256="a" * 64,
+        effective_config_sha256="b" * 64,
+        attempt=1,
+        parent_run_id=None,
+    )
+    config = PipelineConfig.load(environ={})
+    application._write_failure(
+        tmp_path,
+        context,
+        RuntimeError("/private/path token=secret"),
+        "failed",
+        config,
+    )
+    payload = json.loads((tmp_path / "run_failure.json").read_text())
+    assert payload["message"] == "pipeline execution failed"
+    assert "private_traceback" not in payload
+    assert not (tmp_path / "run_failure.json.tmp").exists()
 
 
 def test_resume_uses_full_sha256_not_display_hash(tmp_path, monkeypatch):

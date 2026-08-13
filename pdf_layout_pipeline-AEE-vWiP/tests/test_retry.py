@@ -17,6 +17,9 @@ def write_run(root, config, pdf_hash="abc"):
         + "\n",
         encoding="utf-8",
     )
+    (root / "artifact_manifest.json").write_text(
+        json.dumps({"run_id": "parent", "attempt": 2}), encoding="utf-8"
+    )
 
 
 def test_retry_plan_selects_only_failed_pages_after_identity_checks(tmp_path):
@@ -27,6 +30,8 @@ def test_retry_plan_selects_only_failed_pages_after_identity_checks(tmp_path):
     )
     assert plan["failed_pages"] == [2]
     assert plan["retryable"]
+    assert plan["parent_run_id"] == "parent"
+    assert plan["attempt"] == 3
 
 
 def test_retry_plan_rejects_incompatible_input_or_config(tmp_path):
