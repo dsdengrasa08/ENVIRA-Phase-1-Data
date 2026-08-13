@@ -13,6 +13,7 @@ filenames, hashes, or document-specific exceptions.
 | Later headers | Exclude header | top-band position, recurrence, source-PDF row geometry | generic geometry/recurrence | yes | caption/asset and body protections |
 | Header ROI OCR | Supply fallback evidence | OCR only when the source text layer has no plausible shallow line | generic extraction fallback | no | typed controls, validated ROI, per-ROI cache, categorized failures, dependency-only circuit breaker, diagnostics |
 | Figure completion | Expand asset | caption assignment, image ink bands, blockers | generic geometry/structure | yes | barriers and minimum-score controls |
+| Figure decomposition | Split asset | distinct caption identities, stable visual components, joint spatial assignment | generic geometry/structure and scholarly captions | yes | all three evidence classes required; ambiguity preserves source |
 | Nested assets | Change emission | containment in a figure/table | generic geometry | yes | recovered into hierarchy resolution |
 | Side margins | Exclude furniture | narrow outer-margin geometry | generic geometry | yes | text/type constraints |
 | Footer furniture | Exclude furniture | bottom-band geometry and visual/text recurrence | generic recurrence; optional publisher lexical | yes | assigned captions protect assets |

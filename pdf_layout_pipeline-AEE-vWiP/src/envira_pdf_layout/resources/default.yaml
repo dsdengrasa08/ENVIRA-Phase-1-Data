@@ -35,6 +35,12 @@ figures:
   max_completion_edge_growth_ratio: 0.45
   completion_paragraph_min_chars: 80
   completion_min_assignment_score: 7.0
+  decompose_oversized: true
+  decomposition_min_caption_identities: 2
+  decomposition_min_component_area_ratio: 0.025
+  decomposition_max_foreground_bridge_ratio: 0.08
+  decomposition_min_assignment_margin: 0.08
+  decomposition_padding_page_ratio: 0.002
 footer:
   enabled: true
 tail:
