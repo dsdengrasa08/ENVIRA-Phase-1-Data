@@ -31,6 +31,7 @@ class BBox:
 class Provenance:
     page_no: int
     bbox: BBox | None
+    orientation: float | None = None
 
 
 @dataclass
@@ -173,3 +174,14 @@ def test_bottom_left_bbox_is_normalized_and_clipped():
     assert docling_bbox_to_px(
         BBox(-10, 10, 110, 30, "BOTTOMLEFT"), PAGES[0]
     ) == (0.0, 340.0, 200.0, 380.0)
+
+
+def test_upstream_orientation_is_preserved_in_region_contract():
+    result = convert(
+        Document([Item("caption", [Provenance(3, BBox(10, 20, 20, 100), 270)])])
+    )
+    assert result.regions[0]["orientation"] == {
+        "angle_degrees": 270.0,
+        "confidence": 1.0,
+        "source": "docling_provenance",
+    }

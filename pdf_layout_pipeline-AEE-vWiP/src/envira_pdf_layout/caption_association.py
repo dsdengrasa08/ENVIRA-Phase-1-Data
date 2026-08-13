@@ -12,6 +12,7 @@ from typing import Any
 from .config import CaptionAssociationConfig
 from .types import LayoutRegion
 from .region_index import RegionIndex
+from .orientation import local_relation, region_orientation
 from .semantic_caption import (
     SemanticCaptionReference as CaptionReference,
     body_reference_evidence,
@@ -127,8 +128,17 @@ def associate_captions(
                 if expected and parent.get("type") not in expected:
                     continue
                 pb = list(map(float, parent["bbox_px"]))
-                overlap = _horizontal_overlap(cb, pb)
-                gap = max(0.0, max(cb[1], pb[1]) - min(cb[3], pb[3])) / height
+                orientation = region_orientation(caption)
+                angle = orientation["angle_degrees"]
+                local = local_relation(cb, pb, angle) if angle is not None else None
+                if local and local["side"] in {"before", "after"}:
+                    overlap = float(local["overlap"])
+                    gap = float(local["gap"]) / max(1.0, (width**2 + height**2) ** 0.5)
+                    geometry_space = "asset_local_orientation"
+                else:
+                    overlap = _horizontal_overlap(cb, pb)
+                    gap = max(0.0, max(cb[1], pb[1]) - min(cb[3], pb[3])) / height
+                    geometry_space = "page_axes_fallback"
                 if (
                     overlap < config.min_horizontal_overlap_ratio
                     or gap > config.max_vertical_gap_page_ratio
@@ -138,7 +148,7 @@ def associate_captions(
                     caption.get("reading_order_column"),
                     parent.get("reading_order_column"),
                 )
-                if caption_column not in {
+                if geometry_space == "page_axes_fallback" and caption_column not in {
                     None,
                     "single",
                     parent_column,
@@ -154,7 +164,13 @@ def associate_captions(
                 if blocker:
                     continue
                 direction_match = (
-                    cb[1] >= pb[3] if parent.get("type") != "Table" else cb[3] <= pb[1]
+                    (local["side"] == ("before" if parent.get("type") == "Table" else "after"))
+                    if geometry_space == "asset_local_orientation"
+                    else (
+                        cb[1] >= pb[3]
+                        if parent.get("type") != "Table"
+                        else cb[3] <= pb[1]
+                    )
                 )
                 score = (
                     0.45 * overlap
@@ -175,6 +191,8 @@ def associate_captions(
                         "horizontal_overlap": round(overlap, 6),
                         "vertical_gap_page_ratio": round(gap, 6),
                         "direction_match": direction_match,
+                        "geometry_space": geometry_space,
+                        "orientation": orientation,
                     }
                 )
             alternatives = [

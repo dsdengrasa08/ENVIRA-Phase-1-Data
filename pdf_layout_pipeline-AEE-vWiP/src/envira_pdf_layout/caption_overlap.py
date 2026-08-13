@@ -15,6 +15,7 @@ from .config import CaptionOverlapConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
 from .semantic_caption import parse_semantic_caption_reference
+from .orientation import project_bbox, region_orientation
 
 _CAPTION_TYPES = {"Caption"}
 _TEXT_LIKE_TYPES = {"Caption", "Text", "Footnote", "Section-header", "Title", "List"}
@@ -417,20 +418,43 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                                 "status": "grouped",
                             }
                         )
-        ordered = sorted(
-            member_ids,
-            key=lambda rid: (
+        orientation_sources = [by_id[rid] for rid in member_ids]
+        orientation = next(
+            (
+                region_orientation(region)
+                for region in orientation_sources
+                if region_orientation(region)["angle_degrees"] is not None
+            ),
+            {"angle_degrees": None, "confidence": 0.0, "source": "unknown"},
+        )
+        angle = orientation["angle_degrees"]
+
+        def semantic_order_key(rid):
+            region = by_id[rid]
+            box = region["bbox_px"]
+            if angle is not None and orientation.get("source") != "bbox_axis":
+                local = project_bbox(box, angle)
+                order_key = (local.block_min, local.inline_min)
+            else:
+                order_key = (
+                    int(region.get("layout_reading_order") or 10**9),
+                    float(box[1]),
+                    float(box[0]),
+                )
+            return (
                 0
                 if rid in identifier_ids
                 or (
-                    (reference := parse_semantic_caption_reference(_text(by_id[rid])))
+                    (reference := parse_semantic_caption_reference(_text(region)))
                     and reference.kind == "table"
                 )
                 else 1,
-                int(by_id[rid].get("layout_reading_order") or 10**9),
-                float(by_id[rid]["bbox_px"][1]),
-                float(by_id[rid]["bbox_px"][0]),
-            ),
+                *order_key,
+            )
+
+        ordered = sorted(
+            member_ids,
+            key=semantic_order_key,
         )
         covered_ids = {
             relation["semantic_covered_region_id"]
@@ -552,6 +576,10 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 "ordered_source_region_ids": ordered,
                 "semantic_text_region_ids": semantic_ids,
                 "text": " ".join(semantic_tokens).strip(),
+                "orientation": orientation,
+                "geometry_space": (
+                    "table_local_orientation" if angle is not None else "page_axes_fallback"
+                ),
                 "source_region_ids": [
                     sid
                     for rid in ordered
@@ -568,6 +596,7 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                         "source_type": by_id[region_id].get("type"),
                         "source_bbox_px": list(by_id[region_id]["bbox_px"]),
                         "detector_score": by_id[region_id].get("score"),
+                        "orientation": region_orientation(by_id[region_id]),
                     }
                     for region_id in ordered
                 ],
