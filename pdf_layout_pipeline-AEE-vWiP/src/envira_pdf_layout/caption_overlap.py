@@ -610,3 +610,32 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
             }
         )
     return groups
+
+
+def annotate_caption_members(regions, caption_groups):
+    """Expose accepted caption membership on physical source regions.
+
+    The detector's ``type`` and ``docling_label`` remain immutable provenance.
+    ``resolved_type`` is the post-processing classification consumers should use
+    when they need one class per source box rather than semantic caption groups.
+    """
+    by_id = {str(region["layout_region_id"]): region for region in regions}
+    for group in caption_groups:
+        identifier_ids = {str(value) for value in group.get("identifier_region_ids", [])}
+        for region_id in group.get("ordered_source_region_ids", []):
+            region = by_id.get(str(region_id))
+            if region is None:
+                continue
+            region["resolved_type"] = "Caption"
+            region["semantic_type"] = "Table Caption"
+            region["semantic_role"] = (
+                "table_caption_identifier"
+                if str(region_id) in identifier_ids
+                else "table_caption_fragment"
+            )
+            region["semantic_group_id"] = group["resolved_region_id"]
+            region["semantic_parent_table_region_id"] = group[
+                "parent_table_region_id"
+            ]
+            region["included_in_semantic_caption"] = True
+    return regions

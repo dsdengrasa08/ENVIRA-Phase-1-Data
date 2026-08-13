@@ -229,10 +229,19 @@ def render_figure_decomposition_overlay(
 
 
 def render_resolved_layout_overlays(run, save=True):
-    """Render duplicate-resolved regions while retaining source IDs in labels."""
+    """Render resolved semantic classes while retaining detector provenance."""
     return [
         render_layout_overlay(
-            _page_with_regions(page, run.resolved_regions),
+            _page_with_regions(
+                page,
+                [
+                    {
+                        **region,
+                        "type": region.get("resolved_type", region.get("type")),
+                    }
+                    for region in run.resolved_regions
+                ],
+            ),
             (
                 run.document.artifacts.overlay_dir
                 / f"page_{page['page_number']:04d}_resolved_layout_overlay.png"

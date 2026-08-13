@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 import platform
 from time import perf_counter
 
-from .caption_overlap import build_caption_groups
+from .caption_overlap import annotate_caption_members, build_caption_groups
 from .caption_association import associate_captions
 from .artifact_validation import validate_relationship_graph
 from .failures import (
@@ -395,6 +395,7 @@ def run_layout_pipeline(conversion, page_set, config):
         )
         result.caption_groups = caption_group_run.value
         result.semantic_groups = result.caption_groups
+        annotate_caption_members(result.resolved_regions, result.caption_groups)
         caption_group_elapsed_ms = caption_group_run.elapsed_ms
         if caption_group_run.issue:
             result.issues.append(caption_group_run.issue.to_dict())
