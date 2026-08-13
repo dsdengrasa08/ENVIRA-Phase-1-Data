@@ -10,8 +10,18 @@ page1:
   abstract_aliases: [Abstract, Summary]
 headers:
   enabled: true
+  roi_ocr_fallback: true
+  roi_ocr_dpi: 300
+  roi_ocr_language: eng
+  roi_ocr_cache: true
+  roi_ocr_disable_after_failure: true
 figures:
   complete_caption_anchored: true
+  max_completion_area_multiplier: 4.0
+  max_completion_page_area_ratio: 0.65
+  max_completion_edge_growth_ratio: 0.45
+  completion_paragraph_min_chars: 80
+  completion_min_assignment_score: 7.0
 footer:
   enabled: true
 tail:
@@ -41,6 +51,13 @@ caption_overlap:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_page_ratio: 0.008
   boundary_overlap_ratio: 0.20
+caption_association:
+  enabled: true
+  max_vertical_gap_page_ratio: 0.10
+  min_horizontal_overlap_ratio: 0.18
+  blocker_horizontal_overlap_ratio: 0.25
+  acceptance_score: 0.35
+  ambiguity_margin: 0.15
 overlap_resolution:
   enabled: true
   # Destructive canonicalization is deliberately high precision. Calibrate
@@ -48,8 +65,42 @@ overlap_resolution:
   duplicate_iou: 0.90
   duplicate_edge_page_ratio: 0.003
   duplicate_area_ratio: 0.85
-  nested_containment: 0.92
   fragment_horizontal_overlap: 0.50
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
   preserve_authoritative_nested_regions: true
+containment:
+  strong_child_coverage: 0.92
+  center_child_coverage: 0.72
+  max_child_parent_area_ratio: 0.85
+  panel_label_max_chars: 12
+  body_paragraph_min_chars: 80
+  caption_identifier_max_chars: 24
+error_policy:
+  mode: strict
+  page_failure: continue
+  stage_failure: stop
+  export_partial_results: true
+  max_failed_pages: 3
+  max_failed_page_ratio: 0.10
+core:
+  # `extracted` currently uses the typed strangler adapter; use shadow_compare
+  # during migration to publish semantic differences against the frozen core.
+  implementation: preserved
+  compare_with_preserved: false
+  fail_on_difference: true
+heuristics:
+  # Publisher terms are data-only evidence and cannot delete content without
+  # corroborating generic geometry/structure in confirmatory mode.
+  publisher_profiles: [elsevier_sciencedirect, generic_academic_publishers]
+  publisher_mode: confirmatory
+  document_family: auto
+  language: auto
+content_policy:
+  retain_front_matter: false
+  retain_references: false
+  retain_acknowledgements: false
+  retain_declarations: false
+  retain_appendices: false
+  retain_supplementary_sections: false
+  preserve_excluded_sections_in_secondary_stream: true
