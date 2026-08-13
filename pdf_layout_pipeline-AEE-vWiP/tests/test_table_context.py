@@ -353,3 +353,89 @@ def test_fragmented_identifier_cannot_be_synthesized_across_table():
     group = associate(regions)[0]
     assert group["identifier_region_ids"] == []
     assert group["caption_region_ids"] == []
+
+
+def test_text_table_number_joins_adjacent_caption_on_same_side_only():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region("table", "Table", [125, 100, 600, 800], order=1),
+        region(
+            "caption",
+            "Caption",
+            [605, 100, 650, 800],
+            "Values in parentheses represent standard errors.",
+            2,
+        ),
+        region(
+            "table-number-text",
+            "Text",
+            [655, 100, 700, 800],
+            "See Table 2 for treatment codes.",
+            3,
+        ),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["caption_side"] == "right"
+    assert group["identifier_region_ids"] == ["table-number-text"]
+    assert group["caption_region_ids"] == ["caption", "table-number-text"]
+    assert (
+        next(
+            edge
+            for edge in group["associations"]
+            if edge["region_id"] == "table-number-text"
+        )["features"]["rule"]
+        == "same_side_table_reference_next_to_caption"
+    )
+
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["table-number-text", "caption"]
+    assert "See Table 2" in caption["text"]
+    assert caption["bbox_px"] == [605.0, 100.0, 700.0, 800.0]
+    assert caption["bbox_px"][0] > group["table_bbox"][2]
+
+
+def test_text_table_number_can_join_opposite_caption_without_spanning_table_bbox():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "caption-left",
+            "Caption",
+            [80, 100, 120, 800],
+            "Seasonal emissions by treatment.",
+            1,
+        ),
+        region("table", "Table", [125, 100, 600, 800], order=2),
+        region(
+            "table-number-text",
+            "Text",
+            [605, 100, 650, 800],
+            "See Table 2 for treatment codes.",
+            3,
+        ),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["caption_side"] == "left"
+    assert group["identifier_region_ids"] == ["table-number-text"]
+    assert group["caption_region_ids"] == ["caption-left", "table-number-text"]
+    edge = next(
+        edge
+        for edge in group["associations"]
+        if edge["region_id"] == "table-number-text"
+    )
+    assert edge["features"]["rule"] == "opposite_side_table_reference_same_caption"
+    assert edge["features"]["preserve_separate_geometry"] is True
+
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["bbox_spans_table"] is True
+    assert caption["bbox_parts"] == [
+        [605.0, 100.0, 650.0, 800.0],
+        [80.0, 100.0, 120.0, 800.0],
+    ]
+    assert caption["bbox_px"] == [80.0, 100.0, 120.0, 800.0]
+    assert caption["bbox_px"][2] < group["table_bbox"][0]

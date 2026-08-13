@@ -29,6 +29,12 @@ _PROSE_LEAD_RE = re.compile(
     re.IGNORECASE,
 )
 _PLURAL_RE = re.compile(r"\btables?\s+\w+\s+(?:and|to|[-–])\s+\w+", re.IGNORECASE)
+_TABLE_MENTION_RE = re.compile(
+    r"\b(?P<label>(?:(?:supplementary|supplemental)\s+)?(?:table|tab\.?)\s*"
+    r"(?P<number>(?:[A-Z]\s*[.\-]?\s*)?\d+(?:\s*[.\-]\s*\d+)?|"
+    r"[IVXLCDM]+|[A-Z]))\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,29 @@ def body_reference_evidence(value: Any) -> list[str]:
     if re.search(r"\([^)]*\btable\b[^)]*\)", text, re.IGNORECASE):
         reasons.append("parenthetical_reference")
     return reasons
+
+
+def find_table_reference_mention(value: Any) -> SemanticCaptionReference | None:
+    """Find one singular Table identifier embedded in a larger text fragment.
+
+    This is supporting fragment evidence, not a stand-alone caption decision.
+    Callers must require an already-associated Caption and same-side geometry.
+    """
+    text = normalize_caption_text(value)
+    if _PLURAL_RE.search(text):
+        return None
+    match = _TABLE_MENTION_RE.search(text)
+    if not match:
+        return None
+    return SemanticCaptionReference(
+        kind="table",
+        label=match.group("label").strip(),
+        number=re.sub(r"\s+", "", match.group("number")),
+        start=match.start(),
+        end=match.end(),
+        position="leading" if match.start() == 0 else "embedded",
+        confidence=0.72 if match.start() else 1.0,
+    )
 
 
 def parse_fragmented_table_reference(

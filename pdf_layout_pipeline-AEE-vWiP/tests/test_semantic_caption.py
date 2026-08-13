@@ -1,5 +1,6 @@
 from envira_pdf_layout.semantic_caption import (
     body_reference_evidence,
+    find_table_reference_mention,
     parse_semantic_caption_reference,
 )
 
@@ -40,3 +41,9 @@ def test_ocr_tolerance_is_opt_in_and_leading_only():
         )
         is None
     )
+
+
+def test_embedded_singular_table_mention_is_available_only_as_fragment_evidence():
+    mention = find_table_reference_mention("See Table 2 for treatment codes.")
+    assert mention and mention.number == "2" and mention.position == "embedded"
+    assert find_table_reference_mention("Results from Tables 3 and 4 differ.") is None
