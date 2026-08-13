@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://envira.example/schema/model-manifest-v1.json",
+  "title": "ENVIRA model manifest v1",
+  "type": "object",
+  "required": ["model_manifest_schema_version", "backend", "backend_version", "model_set", "files"],
+  "properties": {
+    "model_manifest_schema_version": {"const": 1},
+    "backend": {"type": "string"},
+    "backend_version": {"type": "string"},
+    "model_set": {"type": "string"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "bytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

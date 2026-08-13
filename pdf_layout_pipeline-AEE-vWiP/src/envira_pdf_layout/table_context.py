@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import TableContextConfig
 from .types import LayoutRegion
+from .region_index import RegionIndex
 
 _TABLE_LABEL_RE = re.compile(
     r"^\s*(?P<label>(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
@@ -145,7 +146,9 @@ def _score_edge(
         "raw_class": (
             2.0
             if role == "caption" and candidate.get("type") == "Caption"
-            else 1.4 if role == "note" and candidate.get("type") == "Footnote" else 0.0
+            else 1.4
+            if role == "note" and candidate.get("type") == "Footnote"
+            else 0.0
         ),
         "identifier_lexical": 1.8 if label_match and role == "caption" else 0.0,
         "note_lexical": 1.5 if note_match and role == "note" else 0.0,
@@ -401,6 +404,8 @@ def associate_table_context(
     document_id: str,
     config: TableContextConfig | None = None,
     relationships: list[dict[str, Any]] | None = None,
+    index: RegionIndex | None = None,
+    metrics: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Create table groups using constrained, explainable relationship scoring.
 
@@ -419,14 +424,13 @@ def associate_table_context(
             relationship_kinds[frozenset((str(left), str(right)))].add(
                 str(relationship.get("kind") or "")
             )
-    page_sizes = {int(page["page_number"]): _page_size(page) for page in pages}
-    by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
-    for region in regions:
-        by_page[int(region["page_number"])].append(region)
+    index = index or RegionIndex.build(regions, pages)
+    metrics = metrics if metrics is not None else {}
+    metrics.update(tables=0, candidate_role_pairs=0, scored_edges=0)
 
     groups: list[dict[str, Any]] = []
-    for page_number in sorted(by_page):
-        page_regions = by_page[page_number]
+    for page_number in sorted(index.by_page):
+        page_regions = index.by_page[page_number]
         tables = sorted(
             (region for region in page_regions if region.get("type") == "Table"),
             key=lambda region: (
@@ -435,7 +439,8 @@ def associate_table_context(
                 float(region["bbox_px"][0]),
             ),
         )
-        width, height = page_sizes.get(page_number, (1.0, 1.0))
+        width, height = index.page_sizes.get(page_number, (1.0, 1.0))
+        metrics["tables"] += len(tables)
         page_groups: dict[str, dict[str, Any]] = {}
         for ordinal, table in enumerate(tables, 1):
             internal_id = f"{document_id}:p{page_number:04d}:t{ordinal:02d}"
@@ -461,6 +466,7 @@ def associate_table_context(
                 if candidate is table:
                     continue
                 for role in ("caption", "note"):
+                    metrics["candidate_role_pairs"] += 1
                     if role == "caption" and not (
                         candidate.get("type") == "Caption"
                         or _TABLE_LABEL_RE.match(str(candidate.get("text") or ""))
@@ -478,6 +484,7 @@ def associate_table_context(
                     )
                     if edge and edge["score"] >= config.acceptance_score:
                         edges.append(edge)
+                        metrics["scored_edges"] += 1
 
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:
@@ -494,7 +501,6 @@ def associate_table_context(
             winner["accepted"] = True
             winner["alternative_count"] = len(alternatives) - 1
             group = page_groups[winner["table_region_id"]]
-            region = region_by_id[region_id]
             if winner["proposed_role"] == "caption":
                 if winner["printed_label"]:
                     group["identifier_region_ids"].append(region_id)

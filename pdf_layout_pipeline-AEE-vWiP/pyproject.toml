@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "envira-pdf-layout"
+dynamic = ["version"]
+description = "Auditable PDF layout extraction pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "docling>=2,<3",
+  "PyMuPDF>=1.23,<2",
+  "opencv-python-headless>=4.8,<5",
+  "pandas>=2,<3",
+  "matplotlib>=3.7,<4",
+  "tqdm>=4.66,<5",
+  "numpy>=1.26,<3",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7", "packaging>=24,<26"]
+notebook = ["jupyterlab>=4,<5"]
+ocr = ["pytesseract>=0.3.10,<1"]
+model = []
+dev = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7", "packaging>=24,<26", "jupyterlab>=4,<5", "pytesseract>=0.3.10,<1"]
+
+[project.scripts]
+envira-pdf-layout = "envira_pdf_layout.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+envira_pdf_layout = ["resources/*.yaml", "resources/*.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "envira_pdf_layout._version.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "unit: fast deterministic unit checks",
+  "integration: package integration checks",
+  "regression: versioned semantic regression contracts",
+  "performance: deterministic work-count contracts",
+  "ocr: checks requiring OCR support",
+  "model: checks requiring model artifacts",
+]
