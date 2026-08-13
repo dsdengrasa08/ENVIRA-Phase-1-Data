@@ -7,21 +7,17 @@ never resized, reclassified, or suppressed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import re
 from typing import Any
 
 from .config import CaptionAssociationConfig
 from .types import LayoutRegion
 from .region_index import RegionIndex
-
-_REFERENCE_RE = re.compile(
-    r"^\s*(?P<label>(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
-    r"(?P<kind>fig(?:ure)?\.?|table|tab\.?|equation|eq\.?|"
-    r"algorithm|listing)\s+(?P<number>[A-Z]?\d+(?:[.\-]\w+)?|[A-Z]|[IVXLCDM]+))"
-    r"(?:\s*[:.\-])?(?:\s+|$)",
-    re.IGNORECASE,
+from .semantic_caption import (
+    SemanticCaptionReference as CaptionReference,
+    body_reference_evidence,
+    parse_semantic_caption_reference,
 )
+
 _PARENT_TYPES = {"Figure", "Table", "Formula", "Code"}
 _EXPECTED_PARENT = {
     "figure": {"Figure"},
@@ -33,29 +29,9 @@ _EXPECTED_PARENT = {
 _BLOCKER_TYPES = {"Title", "Section-header", "Figure", "Table", "Formula", "Code"}
 
 
-@dataclass(frozen=True)
-class CaptionReference:
-    kind: str
-    label: str
-    number: str
-
-
 def parse_caption_reference(text: Any) -> CaptionReference | None:
     """Parse an explicit asset identifier without publisher-specific vocabulary."""
-    match = _REFERENCE_RE.match(str(text or ""))
-    if not match:
-        return None
-    raw_kind = match.group("kind").casefold().rstrip(".")
-    kind = (
-        "figure"
-        if raw_kind in {"fig", "figure"}
-        else "table"
-        if raw_kind in {"tab", "table"}
-        else "equation"
-        if raw_kind in {"eq", "equation"}
-        else raw_kind
-    )
-    return CaptionReference(kind, match.group("label").strip(), match.group("number"))
+    return parse_semantic_caption_reference(text)
 
 
 def _page_size(page: dict[str, Any]) -> tuple[float, float]:
@@ -134,14 +110,15 @@ def associate_captions(
             if (
                 r.get("semantic_role") != "metadata_container_heading"
                 and (
-                    r.get("type") == "Caption"
-                    or references[str(r["layout_region_id"])]
+                    r.get("type") == "Caption" or references[str(r["layout_region_id"])]
                 )
             )
         ]
         metrics["caption_candidates"] += len(candidates)
         for caption in candidates:
             reference = references[str(caption["layout_region_id"])]
+            if reference and body_reference_evidence(caption.get("text")):
+                continue
             expected = _EXPECTED_PARENT.get(reference.kind) if reference else None
             cb = list(map(float, caption["bbox_px"]))
             alternatives: list[dict[str, Any]] = []
