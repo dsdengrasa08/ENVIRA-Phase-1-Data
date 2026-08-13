@@ -1,9 +1,13 @@
 import inspect
+import json
+from types import SimpleNamespace
 
 import pytest
 
 from envira_pdf_layout import run_pdf, run_layout_pipeline, validate_artifacts
+import envira_pdf_layout.application as application
 from envira_pdf_layout.application import InputPDFError, PipelineRunSummary
+from envira_pdf_layout.config import PipelineConfig
 
 
 def test_application_api_is_file_oriented_and_public():
@@ -29,3 +33,32 @@ def test_application_rejects_non_pdf_before_model_initialization(tmp_path):
 def test_application_requires_an_existing_input(tmp_path):
     with pytest.raises(FileNotFoundError, match="PDF not found"):
         run_pdf(tmp_path / "missing.pdf", tmp_path / "output")
+
+
+def test_resume_uses_full_sha256_not_display_hash(tmp_path, monkeypatch):
+    manifest = tmp_path / "artifact_manifest.json"
+    config = PipelineConfig.load(environ={})
+    manifest.write_text(
+        json.dumps(
+            {
+                "run_status": "complete",
+                "source_pdf_sha256": "a" * 64,
+                "effective_config_sha256": application.effective_config_sha256(config),
+            }
+        ),
+        encoding="utf-8",
+    )
+    document = SimpleNamespace(
+        pdf_hash="same-short-id",
+        pdf_sha256="b" * 64,
+        doc_id="doc",
+        artifacts=SimpleNamespace(
+            artifact_manifest_json=manifest,
+            document_dir=tmp_path,
+        ),
+    )
+    monkeypatch.setattr(
+        application, "validate_exported_artifacts", lambda *_: {"valid": True}
+    )
+    with pytest.raises(ValueError, match="input hash"):
+        application._resume_summary(document, config)

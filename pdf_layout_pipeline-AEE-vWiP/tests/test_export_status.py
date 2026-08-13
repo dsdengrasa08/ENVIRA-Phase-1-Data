@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from types import SimpleNamespace
 import pytest
 
@@ -103,3 +104,31 @@ def test_partial_export_can_be_disabled(tmp_path):
     )
     with pytest.raises(RuntimeError, match="partial result export"):
         export_pipeline_result(value)
+
+
+def test_export_redacts_secrets_omits_raw_payloads_and_sets_private_modes(tmp_path):
+    value = run(tmp_path, "complete")
+    value.raw_document = {"text": "private raw content"}
+    value.raw_markdown = "private markdown"
+    value.diagnostics["effective_config"].update(
+        {
+            "legacy_core_environment": {"PHASE1_API_TOKEN": "secret-value"},
+            "privacy": {
+                "export_raw_document": False,
+                "export_raw_markdown": False,
+                "redact_effective_config": True,
+                "export_region_text": True,
+                "export_source_paths": False,
+                "diagnostics_detail": "standard",
+            },
+            "security": {"secure_file_mode": 384},
+        }
+    )
+    export_pipeline_result(value)
+    assert json.loads((tmp_path / "raw.json").read_text()) == {}
+    assert (tmp_path / "raw.md").read_text() == ""
+    config = (tmp_path / "config.json").read_text()
+    assert "secret-value" not in config
+    assert "<redacted>" in config
+    if os.name == "posix":
+        assert (tmp_path / "config.json").stat().st_mode & 0o777 == 0o600

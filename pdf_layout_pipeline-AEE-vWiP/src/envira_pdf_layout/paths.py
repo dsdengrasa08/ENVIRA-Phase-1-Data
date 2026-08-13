@@ -1,20 +1,16 @@
 """Stable document identity and output-path derivation."""
 
 from __future__ import annotations
-import hashlib
 import re
 import shutil
 from pathlib import Path
 from .config import PipelineConfig
 from .types import ArtifactPaths, DocumentIdentity
+from .security import secure_directory, secure_file, sha256_file
 
 
 def file_sha256_short(path: Path, length: int = 12) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()[:length]
+    return sha256_file(path)[:length]
 
 
 def safe_name(value: str) -> str:
@@ -30,22 +26,33 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
     source = config.document.source_pdf.expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"PDF not found: {source}")
-    pdf_hash = file_sha256_short(source)
+    if source.stat().st_size > config.security.max_input_pdf_bytes:
+        raise ValueError("input PDF exceeds security.max_input_pdf_bytes")
+    pdf_sha256 = sha256_file(source, max_bytes=config.security.max_input_pdf_bytes)
+    pdf_hash = pdf_sha256[:12]
     doc_id = f"{safe_name(source.stem)}__{pdf_hash}"
     input_dir = config.runtime.project_dir / "input_pdfs"
-    input_dir.mkdir(parents=True, exist_ok=True)
+    secure_directory(input_dir, config.security.secure_directory_mode)
     persistent = input_dir / f"{doc_id}.pdf"
-    if not persistent.exists() or not config.document.prefer_persistent_copy:
+    if (
+        not persistent.exists()
+        or not config.document.prefer_persistent_copy
+        or sha256_file(persistent, max_bytes=config.security.max_input_pdf_bytes)
+        != pdf_sha256
+    ):
         shutil.copy2(source, persistent)
+    secure_file(persistent, config.security.secure_file_mode)
     with fitz.open(persistent) as pdf:
         total = int(pdf.page_count)
+    if total > config.security.max_page_count:
+        raise ValueError("input PDF exceeds security.max_page_count")
     start = config.document.page_start
     end = min(config.document.page_end or total, total)
     if start > total or end < start:
         raise ValueError(f"Invalid page range {start}-{end} for {total}-page PDF")
-    document_dir = (
-        config.runtime.project_dir / "outputs" / "docling_layout_only" / doc_id
-    )
+    output_root = config.runtime.project_dir / "outputs" / "docling_layout_only"
+    secure_directory(output_root, config.security.secure_directory_mode)
+    document_dir = output_root / doc_id
     if config.document.run_id:
         document_dir /= safe_name(config.document.run_id)
     artifacts = ArtifactPaths(
@@ -88,7 +95,11 @@ def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
         artifacts.page_image_dir,
         artifacts.overlay_dir,
     ):
-        directory.mkdir(parents=True, exist_ok=True)
+        secure_directory(directory, config.security.secure_directory_mode)
+    sentinel = document_dir / ".envira-run-root"
+    if not sentinel.exists():
+        sentinel.write_text(doc_id + "\n", encoding="utf-8")
+        secure_file(sentinel, config.security.secure_file_mode)
     return DocumentIdentity(
-        source, persistent, source.name, pdf_hash, doc_id, total, start, end, artifacts
+        source, persistent, source.name, pdf_hash, pdf_sha256, doc_id, total, start, end, artifacts
     )

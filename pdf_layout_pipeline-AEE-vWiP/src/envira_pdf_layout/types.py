@@ -64,6 +64,7 @@ class DocumentIdentity:
     pdf_path: Path
     original_name: str
     pdf_hash: str
+    pdf_sha256: str
     doc_id: str
     total_pages: int
     page_start: int

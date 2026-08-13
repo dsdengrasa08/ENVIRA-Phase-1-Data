@@ -119,6 +119,23 @@ def test_invalid_range():
         PipelineConfig(document=DocumentConfig(page_start=3, page_end=2)).validate()
 
 
+def test_security_and_privacy_defaults_are_conservative():
+    config = PipelineConfig.load(environ={})
+    assert config.privacy.export_raw_document is False
+    assert config.privacy.export_raw_markdown is False
+    assert config.privacy.redact_effective_config is True
+    assert config.security.allow_symlink_artifacts is False
+    assert config.security.allow_remote_services is False
+    assert config.security.secure_file_mode == 0o600
+
+
+def test_security_limits_and_private_modes_are_validated():
+    with pytest.raises(ValueError, match="max_artifact_bytes"):
+        PipelineConfig.load(environ={}, security={"max_artifact_bytes": 0})
+    with pytest.raises(ValueError, match="group/other"):
+        PipelineConfig.load(environ={}, security={"secure_file_mode": 0o644})
+
+
 def test_invalid_table_context_ratio():
     with pytest.raises(ValueError):
         PipelineConfig(

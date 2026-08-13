@@ -89,6 +89,26 @@ core:
   implementation: preserved
   compare_with_preserved: false
   fail_on_difference: true
+security:
+  max_input_pdf_bytes: 250000000
+  max_page_count: 2000
+  max_artifact_bytes: 500000000
+  max_total_artifact_bytes: 2000000000
+  max_jsonl_line_bytes: 8000000
+  max_jsonl_rows: 2000000
+  max_validation_errors: 1000
+  allow_symlink_artifacts: false
+  allow_remote_services: false
+  secure_file_mode: 384  # 0o600
+  secure_directory_mode: 448  # 0o700
+privacy:
+  export_raw_document: false
+  export_raw_markdown: false
+  export_region_text: true
+  export_source_paths: false
+  redact_effective_config: true
+  diagnostics_detail: standard
+  retain_failed_artifacts: false
 heuristics:
   # Publisher terms are data-only evidence and cannot delete content without
   # corroborating generic geometry/structure in confirmatory mode.

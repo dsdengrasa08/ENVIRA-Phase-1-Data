@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
+from .config import SecurityConfig
+from .security import ArtifactSecurityError, resolve_artifact_path, sha256_file
 from .schema import (
     COMPLETION_PROPOSAL_SCHEMA_VERSION,
     RELATIONSHIP_SCHEMA_VERSION,
@@ -69,16 +72,26 @@ def validate_relationship_graph(
     return {"valid": not errors, "errors": errors}
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+def _read_jsonl(
+    path: Path, *, max_line_bytes: int, max_rows: int
+) -> list[dict[str, Any]]:
+    rows = []
+    with path.open("rb") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if line_number > max_rows:
+                raise ValueError("jsonl_row_limit_exceeded")
+            if len(line) > max_line_bytes:
+                raise ValueError("jsonl_line_limit_exceeded")
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
 
-
-def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
+def validate_exported_artifacts(
+    document_dir: Path, security: SecurityConfig | None = None
+) -> dict[str, Any]:
     """Check required JSON/JSONL artifacts and cross-file region references."""
+    security = security or SecurityConfig()
+    document_dir = Path(document_dir)
     required = {
         "effective_config.json": "json",
         "pipeline_diagnostics.json": "json",
@@ -94,18 +107,32 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
     }
     errors = []
     loaded: dict[str, Any] = {}
+    total_bytes = 0
     for name, kind in required.items():
-        path = document_dir / name
-        if not path.is_file():
+        try:
+            path = resolve_artifact_path(
+                document_dir, name,
+                allow_symlinks=security.allow_symlink_artifacts,
+            )
+        except (ArtifactSecurityError, FileNotFoundError, OSError):
             errors.append({"artifact": name, "error": "missing"})
             continue
         try:
+            size = path.stat().st_size
+            total_bytes += size
+            if size > security.max_artifact_bytes:
+                raise ValueError("artifact_size_limit_exceeded")
+            if total_bytes > security.max_total_artifact_bytes:
+                raise ValueError("total_artifact_size_limit_exceeded")
             loaded[name] = (
                 json.loads(path.read_text(encoding="utf-8"))
                 if kind == "json"
-                else _read_jsonl(path)
+                else _read_jsonl(
+                    path, max_line_bytes=security.max_jsonl_line_bytes,
+                    max_rows=security.max_jsonl_rows,
+                )
             )
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             errors.append(
                 {"artifact": name, "error": f"invalid_{kind}", "detail": str(exc)}
             )
@@ -154,15 +181,42 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
             {"artifact": "artifact_manifest.json", "error": "unsupported_schema"}
         )
     if manifest:
+        seen_paths: set[str] = set()
         for item in manifest.get("files", []):
-            path = document_dir / item["path"]
-            if not path.is_file():
+            if not isinstance(item, dict):
+                errors.append({"artifact": "artifact_manifest.json", "error": "invalid_file_entry"})
+                continue
+            value = item.get("path")
+            if not isinstance(value, str) or not value:
+                errors.append({"artifact": "artifact_manifest.json", "error": "invalid_manifest_path"})
+                continue
+            if not isinstance(item.get("bytes"), int) or item.get("bytes", -1) < 0:
+                errors.append({"artifact": value, "error": "invalid_declared_size"})
+                continue
+            if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", ""))):
+                errors.append({"artifact": value, "error": "invalid_sha256"})
+                continue
+            if value in seen_paths:
+                errors.append({"artifact": value, "error": "duplicate_manifest_path"})
+                continue
+            seen_paths.add(value)
+            try:
+                path = resolve_artifact_path(
+                    document_dir, value,
+                    allow_symlinks=security.allow_symlink_artifacts,
+                )
+                size = path.stat().st_size
+                if size != item.get("bytes"):
+                    errors.append({"artifact": value, "error": "size_mismatch"})
+                    continue
+                digest = sha256_file(path, max_bytes=security.max_artifact_bytes)
+            except (ArtifactSecurityError, FileNotFoundError, OSError, TypeError) as exc:
                 errors.append(
-                    {"artifact": item["path"], "error": "manifest_file_missing"}
+                    {"artifact": value, "error": "unsafe_manifest_path", "detail": str(exc)}
                 )
                 continue
-            import hashlib
-
-            if hashlib.sha256(path.read_bytes()).hexdigest() != item.get("sha256"):
-                errors.append({"artifact": item["path"], "error": "hash_mismatch"})
-    return {"valid": not errors, "errors": errors, "artifacts": sorted(loaded)}
+            if digest != item.get("sha256"):
+                errors.append({"artifact": value, "error": "hash_mismatch"})
+    truncated = len(errors) > security.max_validation_errors
+    errors = errors[: security.max_validation_errors]
+    return {"valid": not errors and not truncated, "errors": errors, "errors_truncated": truncated, "artifacts": sorted(loaded)}

@@ -11,6 +11,7 @@ from typing import Any
 
 from .artifact_validation import validate_exported_artifacts
 from .config import PipelineConfig
+from .security import secure_directory, secure_file
 
 
 class InputPDFError(ValueError):
@@ -70,6 +71,8 @@ def run_pdf(
         raise InputPDFError(f"input is not a readable PDF: {source}")
     root = Path(output_dir).expanduser().resolve()
     base = config or PipelineConfig.load(source_pdf=source)
+    if source.stat().st_size > base.security.max_input_pdf_bytes:
+        raise InputPDFError("input exceeds security.max_input_pdf_bytes")
     config = replace(
         base,
         runtime=replace(base.runtime, project_dir=root, use_google_drive=False),
@@ -102,6 +105,14 @@ def run_pdf(
             raise FileExistsError(
                 f"completed output already exists: {target}; use overwrite or resume"
             )
+        expected_root = (
+            config.runtime.project_dir / "outputs" / "docling_layout_only"
+        ).resolve()
+        if not target.resolve().is_relative_to(expected_root):
+            raise ValueError("refusing to overwrite a directory outside the output root")
+        sentinel = target / ".envira-run-root"
+        if not sentinel.is_file() or sentinel.read_text(encoding="utf-8").strip() != document.doc_id:
+            raise ValueError("refusing to overwrite a directory not owned by ENVIRA")
         shutil.rmtree(target)
         for directory in (
             target,
@@ -109,7 +120,9 @@ def run_pdf(
             document.artifacts.page_image_dir,
             document.artifacts.overlay_dir,
         ):
-            directory.mkdir(parents=True, exist_ok=True)
+            secure_directory(directory, config.security.secure_directory_mode)
+        sentinel.write_text(document.doc_id + "\n", encoding="utf-8")
+        secure_file(sentinel, config.security.secure_file_mode)
 
     try:
         try:
@@ -117,7 +130,9 @@ def run_pdf(
         except FileNotFoundError as exc:
             raise DependencyUnavailableError(str(exc)) from exc
         pages = prepare_pages(document, config.document.render_dpi)
-        backend = DoclingBackend.from_config(config.docling, models["artifact_path"])
+        backend = DoclingBackend.from_config(
+            config.docling, models["artifact_path"], config.security
+        )
         conversion = backend.convert(
             document.pdf_path, (document.page_start, document.page_end)
         )
@@ -125,9 +140,12 @@ def run_pdf(
         result.diagnostics["application"] = {
             "effective_config_sha256": effective_config_sha256(config),
             "source_pdf_bytes": source.stat().st_size,
+            "source_pdf_sha256": document.pdf_sha256,
+            "remote_services_allowed": config.security.allow_remote_services,
+            "remote_services_verified_disabled": not config.security.allow_remote_services,
         }
         export_pipeline_result(result)
-        validation = validate_exported_artifacts(target)
+        validation = validate_exported_artifacts(target, config.security)
         if not validation["valid"]:
             raise ArtifactValidationError(
                 f"artifact validation failed: {validation['errors']}"
@@ -141,10 +159,15 @@ def run_pdf(
             validation,
         )
     except BaseException:
-        (target / "_EXPORTING").unlink(missing_ok=True)
-        for path in terminal:
-            path.unlink(missing_ok=True)
+        if not config.privacy.retain_failed_artifacts and target.exists():
+            shutil.rmtree(target)
+            secure_directory(target, config.security.secure_directory_mode)
+        else:
+            (target / "_EXPORTING").unlink(missing_ok=True)
+            for path in terminal:
+                path.unlink(missing_ok=True)
         (target / "_FAILED").write_text("failed\n", encoding="utf-8")
+        secure_file(target / "_FAILED", config.security.secure_file_mode)
         raise
 
 
@@ -153,11 +176,13 @@ def _resume_summary(document: Any, config: PipelineConfig) -> PipelineRunSummary
     if not manifest_path.is_file():
         raise ValueError("cannot resume without an artifact manifest")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("source_pdf_sha256_short") != document.pdf_hash:
+    if manifest.get("source_pdf_sha256") != document.pdf_sha256:
         raise ValueError("resume input hash does not match the existing run")
     if manifest.get("effective_config_sha256") != effective_config_sha256(config):
         raise ValueError("resume configuration does not match the existing run")
-    validation = validate_exported_artifacts(document.artifacts.document_dir)
+    validation = validate_exported_artifacts(
+        document.artifacts.document_dir, config.security
+    )
     if not validation["valid"]:
         raise ValueError("cannot resume an invalid artifact set")
     return PipelineRunSummary(

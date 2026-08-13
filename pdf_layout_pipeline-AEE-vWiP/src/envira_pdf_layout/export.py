@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import json
-import hashlib
 import os
 import platform
 import subprocess
@@ -12,9 +11,10 @@ from . import __version__
 from .stage_trace import tabular_trace
 from .results import summary_dataframe
 from .types import ExportManifest
+from .security import redact_secrets, sanitize_payload, secure_file, sha256_file
 
 
-def _write_jsonl(path, rows):
+def _write_jsonl(path, rows, mode=0o600):
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8") as stream:
         for row in rows:
@@ -22,15 +22,17 @@ def _write_jsonl(path, rows):
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
+    secure_file(path, mode)
 
 
-def _write_text(path, value):
+def _write_text(path, value, mode=0o600):
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8") as stream:
         stream.write(value)
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
+    secure_file(path, mode)
 
 
 def export_pipeline_result(run):
@@ -41,20 +43,42 @@ def export_pipeline_result(run):
     publishing_marker = paths.document_dir / "_EXPORTING"
     _write_text(publishing_marker, export_started.isoformat() + "\n")
     effective_config = run.diagnostics.get("effective_config", {})
+    privacy = effective_config.get("privacy", {})
+    security = effective_config.get("security", {})
+    file_mode = int(security.get("secure_file_mode", 0o600))
+    include_text = bool(privacy.get("export_region_text", True))
+    include_paths = bool(privacy.get("export_source_paths", False))
+    exported_config = (
+        redact_secrets(effective_config)
+        if privacy.get("redact_effective_config", True)
+        else effective_config
+    )
     if run.status == "partial" and not effective_config.get("error_policy", {}).get(
         "export_partial_results", True
     ):
         raise RuntimeError("partial result export is disabled by error policy")
     _write_text(
         paths.raw_json,
-        json.dumps(run.raw_document, ensure_ascii=False, indent=2, default=str),
+        json.dumps(
+            run.raw_document if privacy.get("export_raw_document", False) else {},
+            ensure_ascii=False, indent=2, default=str,
+        ), file_mode,
     )
-    _write_text(paths.raw_markdown, run.raw_markdown)
+    _write_text(
+        paths.raw_markdown,
+        run.raw_markdown if privacy.get("export_raw_markdown", False) else "",
+        file_mode,
+    )
     _write_text(
         paths.effective_config_json,
-        json.dumps(effective_config, ensure_ascii=False, indent=2),
+        json.dumps(exported_config, ensure_ascii=False, indent=2),
+        file_mode,
     )
-    diagnostics = dict(run.diagnostics)
+    diagnostics = sanitize_payload(
+        redact_secrets(dict(run.diagnostics)),
+        include_text=privacy.get("diagnostics_detail", "standard") in {"debug", "full"},
+        include_paths=include_paths,
+    )
     if "stage_trace" in diagnostics:
         diagnostics["stage_trace"] = {
             **diagnostics["stage_trace"],
@@ -65,33 +89,37 @@ def export_pipeline_result(run):
         paths.diagnostics_json,
         json.dumps(diagnostics, ensure_ascii=False, indent=2, default=str),
     )
-    _write_jsonl(paths.page_records_jsonl, run.pages)
-    _write_jsonl(paths.regions_jsonl, run.final_regions)
-    _write_jsonl(paths.raw_regions_jsonl, run.raw_regions)
-    _write_jsonl(paths.resolved_regions_jsonl, run.resolved_regions)
-    _write_jsonl(paths.physical_regions_jsonl, run.physical_regions)
-    _write_jsonl(paths.top_level_regions_jsonl, run.top_level_regions)
-    _write_jsonl(paths.nested_regions_jsonl, run.nested_regions)
+    def rows(value):
+        return sanitize_payload(value, include_text=include_text, include_paths=include_paths)
+
+    _write_jsonl(paths.page_records_jsonl, rows(run.pages), file_mode)
+    _write_jsonl(paths.regions_jsonl, rows(run.final_regions), file_mode)
+    _write_jsonl(paths.raw_regions_jsonl, rows(run.raw_regions), file_mode)
+    _write_jsonl(paths.resolved_regions_jsonl, rows(run.resolved_regions), file_mode)
+    _write_jsonl(paths.physical_regions_jsonl, rows(run.physical_regions), file_mode)
+    _write_jsonl(paths.top_level_regions_jsonl, rows(run.top_level_regions), file_mode)
+    _write_jsonl(paths.nested_regions_jsonl, rows(run.nested_regions), file_mode)
     _write_jsonl(
         paths.figure_completion_proposals_jsonl,
         run.diagnostics.get("figure_completion", {})
         .get("validation", {})
         .get("proposals", []),
     )
-    _write_jsonl(paths.caption_relationships_jsonl, run.caption_overlap_relationships)
-    _write_jsonl(paths.caption_groups_jsonl, run.caption_groups)
-    _write_jsonl(paths.layout_relationships_jsonl, run.layout_relationships)
-    _write_jsonl(paths.resolution_decisions_jsonl, run.resolution_decisions)
-    _write_jsonl(paths.suppressed_regions_jsonl, run.suppressed_regions)
-    _write_jsonl(paths.post_body_assets_jsonl, run.post_body_assets)
-    _write_jsonl(paths.post_body_asset_regions_jsonl, run.post_body_asset_regions)
-    _write_jsonl(paths.logical_tables_jsonl, run.logical_tables)
+    _write_jsonl(paths.caption_relationships_jsonl, rows(run.caption_overlap_relationships), file_mode)
+    _write_jsonl(paths.caption_groups_jsonl, rows(run.caption_groups), file_mode)
+    _write_jsonl(paths.layout_relationships_jsonl, rows(run.layout_relationships), file_mode)
+    _write_jsonl(paths.resolution_decisions_jsonl, rows(run.resolution_decisions), file_mode)
+    _write_jsonl(paths.suppressed_regions_jsonl, rows(run.suppressed_regions), file_mode)
+    _write_jsonl(paths.post_body_assets_jsonl, rows(run.post_body_assets), file_mode)
+    _write_jsonl(paths.post_body_asset_regions_jsonl, rows(run.post_body_asset_regions), file_mode)
+    _write_jsonl(paths.logical_tables_jsonl, rows(run.logical_tables), file_mode)
     _write_jsonl(paths.stage_trace_jsonl, run.stage_trace)
     _write_jsonl(
         paths.page_diagnostics_jsonl,
         _page_diagnostics(run),
     )
     summary_dataframe(run).to_csv(paths.summary_csv, index=False)
+    secure_file(paths.summary_csv, file_mode)
     files = (
         paths.raw_json,
         paths.raw_markdown,
@@ -126,6 +154,7 @@ def export_pipeline_result(run):
         "artifacts_complete": run.status in {"complete", "complete_with_warnings"},
         "artifact_validation_passed": False,
         "source_pdf_sha256_short": getattr(run.document, "pdf_hash", None),
+        "source_pdf_sha256": getattr(run.document, "pdf_sha256", None),
         "source_pdf_bytes": (
             run.document.source_pdf.stat().st_size
             if getattr(run.document, "source_pdf", None) else None
@@ -134,6 +163,7 @@ def export_pipeline_result(run):
         "package_version": __version__,
         "git_revision": _git_revision(getattr(paths, "project_dir", paths.document_dir)),
         "python_version": platform.python_version(),
+        "remote_services_allowed": run.diagnostics.get("application", {}).get("remote_services_allowed"),
         "started_at": run.diagnostics.get("started_at"),
         "exported_at": export_started.isoformat(),
         "page_range": [getattr(run.document, "page_start", None), getattr(run.document, "page_end", None)],
@@ -152,7 +182,8 @@ def export_pipeline_result(run):
             {
                 "path": path.name,
                 "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": sha256_file(path),
+                "sensitivity": _artifact_sensitivity(path),
             }
             for path in files
         ],
@@ -168,6 +199,16 @@ def export_pipeline_result(run):
     _write_text(paths.document_dir / marker, run.status + "\n")
     publishing_marker.unlink(missing_ok=True)
     return ExportManifest(files + (manifest_path, paths.document_dir / marker))
+
+
+def _artifact_sensitivity(path):
+    if path.name in {"docling_raw.json", "docling_raw.md"}:
+        return "raw_sensitive"
+    if path.name in {"artifact_manifest.json", "stage_trace.jsonl"}:
+        return "operational_metadata"
+    if path.name == "effective_config.json":
+        return "secret_redacted"
+    return "derived_sensitive"
 
 
 def mark_manifest_validated(path):

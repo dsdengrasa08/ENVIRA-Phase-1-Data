@@ -1,2 +1,2 @@
-include README.md ERROR_HANDLING.md HEURISTICS.md SCHEMA.md CORE_MIGRATION.md
+include README.md ERROR_HANDLING.md HEURISTICS.md SCHEMA.md CORE_MIGRATION.md SECURITY.md
 recursive-include src/envira_pdf_layout/resources *.yaml *.json

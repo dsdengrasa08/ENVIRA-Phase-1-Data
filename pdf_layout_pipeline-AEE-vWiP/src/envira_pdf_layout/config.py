@@ -255,6 +255,32 @@ class ExportConfig:
 
 
 @dataclass(frozen=True)
+class SecurityConfig:
+    max_input_pdf_bytes: int = 250_000_000
+    max_page_count: int = 2_000
+    max_artifact_bytes: int = 500_000_000
+    max_total_artifact_bytes: int = 2_000_000_000
+    max_jsonl_line_bytes: int = 8_000_000
+    max_jsonl_rows: int = 2_000_000
+    max_validation_errors: int = 1_000
+    allow_symlink_artifacts: bool = False
+    allow_remote_services: bool = False
+    secure_file_mode: int = 0o600
+    secure_directory_mode: int = 0o700
+
+
+@dataclass(frozen=True)
+class PrivacyConfig:
+    export_raw_document: bool = False
+    export_raw_markdown: bool = False
+    export_region_text: bool = True
+    export_source_paths: bool = False
+    redact_effective_config: bool = True
+    diagnostics_detail: str = "standard"
+    retain_failed_artifacts: bool = False
+
+
+@dataclass(frozen=True)
 class ErrorPolicyConfig:
     """Failure behavior for package-owned stages and page-isolated work."""
 
@@ -322,6 +348,8 @@ class PipelineConfig:
     )
     containment: ContainmentConfig = field(default_factory=ContainmentConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+    privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     error_policy: ErrorPolicyConfig = field(default_factory=ErrorPolicyConfig)
     core: CoreConfig = field(default_factory=CoreConfig)
     heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
@@ -358,6 +386,8 @@ class PipelineConfig:
             "overlap_resolution": OverlapResolutionConfig,
             "containment": ContainmentConfig,
             "export": ExportConfig,
+            "security": SecurityConfig,
+            "privacy": PrivacyConfig,
             "error_policy": ErrorPolicyConfig,
             "core": CoreConfig,
             "heuristics": HeuristicProfileConfig,
@@ -695,3 +725,20 @@ class PipelineConfig:
             raise ValueError(
                 "core.compare_with_preserved is only valid with extracted implementation"
             )
+        for name in (
+            "max_input_pdf_bytes",
+            "max_page_count",
+            "max_artifact_bytes",
+            "max_total_artifact_bytes",
+            "max_jsonl_line_bytes",
+            "max_jsonl_rows",
+            "max_validation_errors",
+        ):
+            if getattr(self.security, name) < 1:
+                raise ValueError(f"security.{name} must be positive")
+        if self.security.secure_file_mode & 0o077:
+            raise ValueError("security.secure_file_mode must not grant group/other access")
+        if self.security.secure_directory_mode & 0o077:
+            raise ValueError("security.secure_directory_mode must not grant group/other access")
+        if self.privacy.diagnostics_detail not in {"minimal", "standard", "debug", "full"}:
+            raise ValueError("privacy.diagnostics_detail is invalid")

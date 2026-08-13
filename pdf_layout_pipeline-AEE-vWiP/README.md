@@ -45,6 +45,8 @@ Existing terminal runs are refused by default. `--overwrite` starts a new attemp
 manifest validation match. Export removes stale terminal markers before publication,
 uses `_EXPORTING` while files are replaced atomically, and writes exactly one terminal
 marker last so consumers never treat an in-progress publication as complete.
+Security limits, private file modes, secret redaction, raw-content controls, and the
+untrusted-input deployment model are documented in [`SECURITY.md`](SECURITY.md).
 
 The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the
