@@ -199,3 +199,44 @@ def test_history_policy_filters_only_history_field_after_structure_inference():
     assert all(
         row.get("document_role") == "article_history" for row in excluded.values()
     )
+
+
+def test_merged_label_values_absorb_detached_final_value_and_enable_container():
+    """Model the detector shape seen in narrow first-page metadata columns."""
+    rows = [
+        region("container", "P U B L I C A T I O N  D A T A", 50, 250, 280, 270),
+        region(
+            "history",
+            "Submission timeline:\nSubmitted 2 January 2024\nAccepted 4 March 2024",
+            50,
+            280,
+            275,
+            345,
+        ),
+        region(
+            "terms-main",
+            "Subject terms:\nNitrogen balance\nAgricultural pollution\nProcess model\nWatershed",
+            50,
+            365,
+            285,
+            455,
+        ),
+        region("terms-final", "Livestock production", 50, 458, 230, 476),
+        region("abstract", "Abstract", 350, 280, 470, 300, "Section-header"),
+    ]
+
+    result = normalize_page1_metadata_structure(rows, page_map(), Page1FilterConfig())
+    indexed = by_id(result)
+
+    assert indexed["container"]["type"] == "Caption"
+    assert "terms-main" not in indexed
+    assert "terms-final" not in indexed
+    descriptor = next(
+        row
+        for row in result.regions
+        if row.get("metadata_field_category") == "scientific_descriptors"
+        and row.get("semantic_role") == "metadata_field_value"
+    )
+    assert descriptor["source_region_ids"] == ["terms-main", "terms-final"]
+    assert descriptor["bbox_px"] == [50.0, 365.0, 285.0, 476.0]
+    assert descriptor["text"].endswith("Watershed\nLivestock production")

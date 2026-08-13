@@ -120,9 +120,8 @@ def _text(region: LayoutRegion) -> str:
     return _SPACE.sub(" ", str(region.get("text") or region.get("orig") or "")).strip()
 
 
-def _field_family(text: str) -> str | None:
-    # Label candidates are deliberately compact.  This prevents a paragraph that
-    # begins with a metadata term from becoming a field boundary.
+def _compact_field_family(text: str) -> str | None:
+    """Classify a compact standalone field label."""
     if not text or len(text.split()) > 8 or len(text) > 100:
         return None
     for family, pattern in _FIELD_FAMILIES:
@@ -131,12 +130,37 @@ def _field_family(text: str) -> str | None:
     return None
 
 
-def _has_inline_value(text: str) -> bool:
-    """Return whether a compact field candidate also carries a value payload."""
-    if ":" not in text:
-        return False
-    _label, value = text.split(":", 1)
-    return bool(value.strip())
+def _field_parts(region: LayoutRegion) -> tuple[str, str, str] | None:
+    """Return ``(family, label, value)`` for standalone or merged fields.
+
+    Docling commonly emits a narrow metadata field as one region whose first line
+    is the label and remaining lines are values.  Born-digital extraction may keep
+    those newlines or flatten the same content after a colon.  Matching the compact
+    prefix, rather than requiring the whole region to be a label, supports both
+    representations without treating arbitrary prose as metadata.
+    """
+    raw = str(region.get("text") or region.get("orig") or "").strip()
+    if not raw:
+        return None
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    candidates: list[tuple[str, str]] = []
+    if len(lines) > 1:
+        candidates.append((lines[0], "\n".join(lines[1:])))
+    flattened = _SPACE.sub(" ", raw).strip()
+    if ":" in flattened:
+        prefix, remainder = flattened.split(":", 1)
+        candidates.append((f"{prefix.strip()}:", remainder.strip()))
+    candidates.append((flattened, ""))
+    for label, value in candidates:
+        family = _compact_field_family(label)
+        if family:
+            return family, label, value
+    return None
+
+
+def _field_family(region: LayoutRegion) -> str | None:
+    parts = _field_parts(region)
+    return parts[0] if parts else None
 
 
 def _horizontal_affinity(a: _Box, b: _Box, page_width: float) -> tuple[float, float]:
@@ -160,6 +184,18 @@ def _heading_style(region: LayoutRegion, text: str) -> bool:
         region.get("type") in {"Caption", "Section-header", "Field-heading"}
         or uppercase
     )
+
+
+def _heading_word_count(text: str) -> int:
+    """Count semantic words while tolerating display letter-spacing."""
+    words = text.split()
+    alphabetic = [word for word in words if word.isalpha()]
+    if (
+        alphabetic
+        and sum(len(word) == 1 for word in alphabetic) / len(alphabetic) >= 0.7
+    ):
+        return 1
+    return len(words)
 
 
 def _union_box(regions: list[LayoutRegion]) -> list[float]:
@@ -233,7 +269,8 @@ def normalize_page1_metadata_structure(
     labels: list[dict[str, Any]] = []
     for index, region in enumerate(ordered):
         text = _text(region)
-        family = _field_family(text)
+        parts = _field_parts(region)
+        family = parts[0] if parts else None
         box = _box(region)
         if (
             family
@@ -246,7 +283,7 @@ def normalize_page1_metadata_structure(
                     "index": index,
                     "region": region,
                     "family": family,
-                    "inline_value": _has_inline_value(text),
+                    "inline_value": bool(parts and parts[2]),
                 }
             )
 
@@ -262,6 +299,11 @@ def normalize_page1_metadata_structure(
             label_region["metadata_field_id"] = field_id
             label_region["metadata_field_category"] = label["family"]
             label_region["metadata_relationship_confidence"] = 0.88
+            # The detector region is both the field anchor and its initial value
+            # payload.  Include it as a value member so any detached last line is
+            # consolidated into the same logical layout.
+            assignments[field_id].append(label_region)
+            claimed.add(str(label_region["layout_region_id"]))
         previous_box = label_box
         local_line_height = max(label_box.height, 1.0)
         for candidate in ordered[label["index"] + 1 :]:
@@ -277,7 +319,7 @@ def normalize_page1_metadata_structure(
                 boundary_overlap >= config.metadata_min_horizontal_overlap
                 or boundary_left <= config.metadata_max_left_alignment_delta
             )
-            if _field_family(candidate_text) or _BODY_BOUNDARY.match(candidate_text):
+            if _field_family(candidate) or _BODY_BOUNDARY.match(candidate_text):
                 if same_label_column:
                     break
                 continue
@@ -322,6 +364,8 @@ def normalize_page1_metadata_structure(
             label_region["metadata_field_category"] = label["family"]
             label_region["metadata_relationship_confidence"] = 0.9
             for value in assignments[field_id]:
+                if value is label_region:
+                    continue
                 relationships.append(
                     {
                         "kind": "VALUE_OF_METADATA_FIELD",
@@ -360,9 +404,11 @@ def normalize_page1_metadata_structure(
                 break
             if (
                 candidate.get("type") in _HEADING_TYPES
-                and 0 < len(candidate_text.split()) <= config.metadata_heading_max_words
+                and 0
+                < _heading_word_count(candidate_text)
+                <= config.metadata_heading_max_words
                 and not _prose_like(candidate_text)
-                and _field_family(candidate_text) is None
+                and _field_family(candidate) is None
                 and _heading_style(candidate, candidate_text)
                 and (
                     overlap >= config.metadata_min_horizontal_overlap
@@ -404,7 +450,11 @@ def normalize_page1_metadata_structure(
             )
         else:
             member = members[0]
-            member["semantic_role"] = "metadata_field_value"
+            member["semantic_role"] = (
+                "metadata_field_label_and_value"
+                if member is label["region"] and label["inline_value"]
+                else "metadata_field_value"
+            )
             member["metadata_field_id"] = field_id
             member["metadata_field_category"] = family
 
