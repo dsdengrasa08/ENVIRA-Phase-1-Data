@@ -8,6 +8,11 @@ from typing import Any
 
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
+from .schema import (
+    COMPLETION_PROPOSAL_SCHEMA_VERSION,
+    apply_geometry_change,
+    initialize_region_schema,
+)
 
 HARD_BARRIER_TYPES = {"Table", "Figure", "Section-header", "Title"}
 SOFT_CONTENT_TYPES = {"Formula", "Equation", "Code"}
@@ -15,6 +20,7 @@ SOFT_CONTENT_TYPES = {"Formula", "Equation", "Code"}
 
 @dataclass(frozen=True)
 class FigureCompletionProposal:
+    proposal_schema_version: int
     proposal_id: str
     figure_region_id: str
     page_number: int
@@ -102,10 +108,9 @@ def validate_figure_completions(
         source = figure.get("figure_completion_original_bbox_px")
         proposed = figure.get("bbox_px")
         if not source or not proposed:
-            figure.setdefault("source_bbox_px", list(figure["bbox_px"]))
-            figure.setdefault("resolved_bbox_px", list(figure["bbox_px"]))
-            figure.setdefault("visual_crop_bbox_px", list(figure["bbox_px"]))
-            figure.setdefault("semantic_group_bbox_px", list(figure["bbox_px"]))
+            initialize_region_schema(
+                figure, page_record=page_map.get(int(figure["page_number"]))
+            )
             continue
         source = list(map(float, source))
         proposed = list(map(float, proposed))
@@ -219,28 +224,25 @@ def validate_figure_completions(
             figure.get("figure_completion_candidate_bbox_px") or resolved
         )
         semantic_group = proposed if accepted else source
-        figure["bbox_px"] = list(resolved)
-        figure["width_px"] = resolved[2] - resolved[0]
-        figure["height_px"] = resolved[3] - resolved[1]
-        figure["area_px"] = bbox_area(tuple(resolved))
+        figure["bbox_px"] = source
+        figure["resolved_bbox_px"] = source
+        figure["physical_bbox_px"] = source
         figure["source_bbox_px"] = source
-        figure["proposed_bbox_px"] = proposed
-        figure["resolved_bbox_px"] = list(resolved)
+        initialize_region_schema(figure, page_record=page)
+        apply_geometry_change(
+            figure,
+            proposed,
+            stage="figure_completion",
+            reason=reason,
+            accepted=accepted,
+            page_record=page,
+        )
         figure["visual_crop_bbox_px"] = visual_crop
         figure["semantic_group_bbox_px"] = semantic_group
-        figure["geometry_version"] = 2 if accepted else 1
-        figure["geometry_history"] = [
-            {"version": 1, "kind": "detector", "bbox_px": source, "accepted": True},
-            {
-                "version": 2,
-                "kind": "figure_completion_proposal",
-                "bbox_px": proposed,
-                "accepted": accepted,
-            },
-        ]
         figure["figure_completion_decision"] = decision
         figure["figure_completion_decision_reason"] = reason
         proposal = FigureCompletionProposal(
+            proposal_schema_version=COMPLETION_PROPOSAL_SCHEMA_VERSION,
             proposal_id=f"p{int(figure['page_number'])}:{figure['layout_region_id']}:completion",
             figure_region_id=str(figure["layout_region_id"]),
             page_number=int(figure["page_number"]),

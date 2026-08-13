@@ -26,6 +26,7 @@ from .nested_containment import (
 from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
 from .region_index import RegionIndex
+from .schema import initialize_region_schema, normalize_relationship_schema
 
 
 def run_layout_pipeline(conversion, page_set, config):
@@ -33,6 +34,12 @@ def run_layout_pipeline(conversion, page_set, config):
     started = perf_counter()
     result = run_independent_core(conversion, page_set, config)
     _collect_core_page_failures(result, config)
+    page_map = {int(page["page_number"]): page for page in result.pages}
+    for collection in (result.raw_regions, result.final_regions):
+        for region in collection:
+            initialize_region_schema(
+                region, page_record=page_map.get(int(region["page_number"]))
+            )
     core_snapshot = snapshot(
         "independent_core",
         result.final_regions,
@@ -181,6 +188,8 @@ def run_layout_pipeline(conversion, page_set, config):
     )
     semantic_associations = caption_run.value
     result.layout_relationships.extend(semantic_associations)
+    for relationship in result.layout_relationships:
+        normalize_relationship_schema(relationship)
     caption_snapshot = snapshot(
         "caption_association",
         result.resolved_regions,
@@ -227,6 +236,26 @@ def run_layout_pipeline(conversion, page_set, config):
         "relationships": result.layout_relationships,
         "decisions": result.resolution_decisions,
         "work": resolution.diagnostics,
+    }
+    previous_ids = {
+        str(decision.get("region_id"))
+        for decision in result.diagnostics.get("nested_assets", {}).get("decisions", [])
+        if decision.get("region_id")
+    }
+    proposal_ids = {str(proposal["child_region_id"]) for proposal in proposals}
+    result.diagnostics["nested_hierarchy"] = {
+        **hierarchy.diagnostics,
+        "relationships": hierarchy.relationships,
+        "decisions": hierarchy.decisions,
+        "top_level_count": len(result.top_level_regions),
+        "nested_count": len(result.nested_regions),
+        "legacy_comparison": {
+            "previous_candidate_ids": sorted(previous_ids),
+            "current_candidate_ids": sorted(proposal_ids),
+            "matched_ids": sorted(previous_ids & proposal_ids),
+            "missing_from_current_ids": sorted(previous_ids - proposal_ids),
+            "new_candidate_ids": sorted(proposal_ids - previous_ids),
+        },
     }
     previous_ids = {
         str(decision.get("region_id"))

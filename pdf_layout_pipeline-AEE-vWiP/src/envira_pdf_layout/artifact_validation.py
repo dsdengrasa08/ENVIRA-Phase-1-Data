@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Iterable
+from .schema import (
+    COMPLETION_PROPOSAL_SCHEMA_VERSION,
+    RELATIONSHIP_SCHEMA_VERSION,
+    validate_region_schema,
+)
 
 
 def validate_relationship_graph(
@@ -16,6 +21,16 @@ def validate_relationship_graph(
     for relationship in relationships:
         kind = str(relationship.get("kind") or "")
         relationship_id = relationship.get("relationship_id")
+        if (
+            relationship.get("relationship_schema_version")
+            != RELATIONSHIP_SCHEMA_VERSION
+        ):
+            errors.append(
+                {
+                    "relationship_id": relationship_id,
+                    "error": "unsupported_relationship_schema",
+                }
+            )
         endpoints = [
             relationship.get("left_region_id"),
             relationship.get("right_region_id"),
@@ -67,12 +82,14 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
     required = {
         "effective_config.json": "json",
         "pipeline_diagnostics.json": "json",
+        "page_records.jsonl": "jsonl",
         "physical_layout_regions.jsonl": "jsonl",
         "top_level_layout_regions.jsonl": "jsonl",
         "nested_layout_regions.jsonl": "jsonl",
         "layout_relationships.jsonl": "jsonl",
         "stage_trace.jsonl": "jsonl",
         "page_diagnostics.jsonl": "jsonl",
+        "figure_completion_proposals.jsonl": "jsonl",
         "artifact_manifest.json": "json",
     }
     errors = []
@@ -97,6 +114,23 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
     nested = loaded.get("nested_layout_regions.jsonl", [])
     if physical and len(physical) != len(top) + len(nested):
         errors.append({"artifact": "hierarchy", "error": "invalid_partition"})
+    pages = {
+        int(row["page_number"]): row
+        for row in loaded.get("page_records.jsonl", [])
+        if row.get("page_number") is not None
+    }
+    for region in physical:
+        region_errors = validate_region_schema(
+            region, pages.get(int(region.get("page_number", -1)))
+        )
+        for error in region_errors:
+            errors.append(
+                {
+                    "artifact": "physical_layout_regions.jsonl",
+                    "region_id": region.get("layout_region_id"),
+                    "error": error,
+                }
+            )
     graph = validate_relationship_graph(
         physical, loaded.get("layout_relationships.jsonl", [])
     )
@@ -105,6 +139,14 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
         if row.get("trace_schema_version") != 1:
             errors.append(
                 {"artifact": "stage_trace.jsonl", "error": "unsupported_schema"}
+            )
+    for row in loaded.get("figure_completion_proposals.jsonl", []):
+        if row.get("proposal_schema_version") != COMPLETION_PROPOSAL_SCHEMA_VERSION:
+            errors.append(
+                {
+                    "artifact": "figure_completion_proposals.jsonl",
+                    "error": "unsupported_schema",
+                }
             )
     manifest = loaded.get("artifact_manifest.json", {})
     if manifest and manifest.get("schema_version") != 1:

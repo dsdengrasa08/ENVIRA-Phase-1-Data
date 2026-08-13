@@ -66,6 +66,9 @@ asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
   counts, and invariants for locating the first stage that introduced a regression.
 - `region_index.py`: immutable per-collection page, ID, type, page-size, and
   normalized-text indexes shared by hierarchy, caption, and table-context stages.
+- `schema.py`: versioned region/relationship contracts, coordinate metadata,
+  geometry lifecycle updates, validation, and additive legacy migration. See
+  [`SCHEMA.md`](SCHEMA.md) and the machine-readable contracts under `schemas/`.
 
 Geometry-heavy stages publish deterministic work counters alongside elapsed time.
 Overlap observations are reused by hierarchy policy, and the shared region index
@@ -82,6 +85,9 @@ require an explicit fixture and reason and refuse invalid traces by default. Use
 the default pull-request suite remains model-free. Export validation checks required
 artifacts, hierarchy partitions, relationship endpoints, unresolved containment,
 and trace schema compatibility.
+Region exports additionally preserve immutable source geometry, distinguish
+physical, visual-crop, and semantic-group boxes, and record every accepted or
+rejected proposal in versioned geometry history.
 
 Test tiers are registered in `pytest.ini`: run `pytest -m regression` for the
 generated semantic fixtures, `pytest -m performance` for deterministic work

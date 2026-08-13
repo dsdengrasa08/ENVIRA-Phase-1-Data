@@ -4,10 +4,24 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, NotRequired, Required, TypedDict
 
-BBox: TypeAlias = tuple[float, float, float, float]
-LayoutRegion: TypeAlias = dict[str, Any]
+BBox = tuple[float, float, float, float]
+
+
+class LayoutRegion(TypedDict, total=False):
+    region_schema_version: Required[int]
+    layout_region_id: Required[str]
+    page_number: Required[int]
+    type: Required[str]
+    bbox_px: Required[list[float]]
+    source_bbox_px: NotRequired[list[float]]
+    resolved_bbox_px: NotRequired[list[float]]
+    physical_bbox_px: NotRequired[list[float]]
+    visual_crop_bbox_px: NotRequired[list[float]]
+    semantic_group_bbox_px: NotRequired[list[float]]
+    geometry_version: NotRequired[int]
+    geometry_history: NotRequired[list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)

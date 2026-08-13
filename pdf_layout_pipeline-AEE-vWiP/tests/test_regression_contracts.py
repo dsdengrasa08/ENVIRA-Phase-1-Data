@@ -11,6 +11,7 @@ from envira_pdf_layout.nested_containment import (
     analyze_nested_containment,
     resolve_nested_hierarchy,
 )
+from envira_pdf_layout.schema import normalize_relationship_schema
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "regression"
@@ -37,7 +38,10 @@ def test_generated_regression_fixture_contracts(path):
     captions = associate_captions(
         hierarchy.regions, PAGES, config=CaptionAssociationConfig()
     )
-    relationships = hierarchy.relationships + captions
+    relationships = [
+        normalize_relationship_schema(relationship)
+        for relationship in hierarchy.relationships + captions
+    ]
     assert validate_relationship_graph(hierarchy.regions, relationships)["valid"]
     expected = fixture["expected"]
     if "nested_child_ids" in expected:

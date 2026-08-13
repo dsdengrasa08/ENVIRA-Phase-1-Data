@@ -90,7 +90,7 @@ def test_object_conversion_preserves_production_schema_and_relative_page_mapping
         "p0003_d000000_01",
     ]
     assert [region["region_index"] for region in result.regions] == [0, 1]
-    assert result.regions[0] == {
+    expected_legacy_fields = {
         "doc_id": "doc",
         "pdf_hash": "hash",
         "layout_region_id": "p0003_d000000_00",
@@ -125,6 +125,12 @@ def test_object_conversion_preserves_production_schema_and_relative_page_mapping
         "area_px": 3200.0,
         "source": "docling",
     }
+    region = result.regions[0]
+    assert {key: region[key] for key in expected_legacy_fields} == expected_legacy_fields
+    assert region["region_schema_version"] == 1
+    assert region["bbox_px"] == region["resolved_bbox_px"] == region["physical_bbox_px"]
+    assert region["geometry_version"] == 1
+    assert region["coordinate_space"]["units"] == "px"
 
 
 def test_serialized_fallback_uses_established_list_order():

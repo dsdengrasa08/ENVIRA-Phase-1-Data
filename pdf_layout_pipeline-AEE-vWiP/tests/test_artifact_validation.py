@@ -5,15 +5,16 @@ from envira_pdf_layout.artifact_validation import (
     validate_relationship_graph,
 )
 from envira_pdf_layout.stage_trace import snapshot
+from envira_pdf_layout.schema import initialize_region_schema, normalize_relationship_schema
 
 
 def region(region_id):
-    return {
+    return initialize_region_schema({
         "layout_region_id": region_id,
         "page_number": 1,
         "type": "Text",
         "bbox_px": [0, 0, 10, 10],
-    }
+    })
 
 
 def write_jsonl(path, rows):
@@ -24,12 +25,12 @@ def test_graph_validator_rejects_missing_endpoints_and_observations():
     result = validate_relationship_graph(
         [region("a")],
         [
-            {
+            normalize_relationship_schema({
                 "relationship_id": "r1",
                 "kind": "CONTAINMENT_CANDIDATE",
                 "left_region_id": "a",
                 "right_region_id": "missing",
-            }
+            })
         ],
     )
     assert not result["valid"]
@@ -44,10 +45,15 @@ def test_export_validator_checks_partition_graph_and_trace_schema(tmp_path):
     (tmp_path / "effective_config.json").write_text("{}", encoding="utf-8")
     (tmp_path / "pipeline_diagnostics.json").write_text("{}", encoding="utf-8")
     write_jsonl(tmp_path / "physical_layout_regions.jsonl", physical)
+    write_jsonl(
+        tmp_path / "page_records.jsonl",
+        [{"page_number": 1, "image_width_px": 100, "image_height_px": 100}],
+    )
     write_jsonl(tmp_path / "top_level_layout_regions.jsonl", physical)
     write_jsonl(tmp_path / "nested_layout_regions.jsonl", [])
     write_jsonl(tmp_path / "layout_relationships.jsonl", [])
     write_jsonl(tmp_path / "stage_trace.jsonl", [snapshot("final", physical)])
+    write_jsonl(tmp_path / "figure_completion_proposals.jsonl", [])
     write_jsonl(
         tmp_path / "page_diagnostics.jsonl", [{"page_number": 1, "status": "completed"}]
     )

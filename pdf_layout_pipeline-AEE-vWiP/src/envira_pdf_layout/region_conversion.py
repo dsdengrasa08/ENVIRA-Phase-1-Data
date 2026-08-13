@@ -12,6 +12,8 @@ from typing import Any
 
 from .geometry import bbox_area, clip_bbox
 from .types import LayoutRegion, PageSet
+from .schema import initialize_region_schema
+
 
 
 _TYPE_MAP = {
@@ -55,7 +57,11 @@ class RegionConversionResult:
 
 
 def _value(obj: Any, name: str, default: Any = None) -> Any:
-    return obj.get(name, default) if isinstance(obj, Mapping) else getattr(obj, name, default)
+    return (
+        obj.get(name, default)
+        if isinstance(obj, Mapping)
+        else getattr(obj, name, default)
+    )
 
 
 def _enum_text(value: Any) -> str:
@@ -115,7 +121,9 @@ def docling_bbox_to_px(
     )
 
 
-def iter_docling_items(document: Any, raw_document: Mapping[str, Any]) -> Iterable[tuple[Any, Any, int]]:
+def iter_docling_items(
+    document: Any, raw_document: Mapping[str, Any]
+) -> Iterable[tuple[Any, Any, int]]:
     """Yield document items in the production backend order."""
     if hasattr(document, "iterate_items"):
         for order, pair in enumerate(document.iterate_items()):
@@ -125,13 +133,22 @@ def iter_docling_items(document: Any, raw_document: Mapping[str, Any]) -> Iterab
                 yield pair, None, order
         return
     order = 0
-    for key in ("texts", "tables", "pictures", "groups", "key_value_items", "form_items"):
+    for key in (
+        "texts",
+        "tables",
+        "pictures",
+        "groups",
+        "key_value_items",
+        "form_items",
+    ):
         for item in raw_document.get(key, []) or []:
             yield item, None, order
             order += 1
 
 
-def _resolve_page_number(page_number: int, page_map: Mapping[int, Any], page_start: int) -> int | None:
+def _resolve_page_number(
+    page_number: int, page_map: Mapping[int, Any], page_start: int
+) -> int | None:
     if page_number in page_map:
         return page_number
     shifted = page_start + page_number - 1
@@ -172,43 +189,59 @@ def convert_docling_document(
                 skipped_geometry_count += 1
                 continue
             x0, y0, x1, y1 = bbox_px
-            regions.append(
-                {
-                    "doc_id": document_id,
-                    "pdf_hash": pdf_hash,
-                    "layout_region_id": f"p{page_number:04d}_d{doc_order:06d}_{provenance_index:02d}",
-                    "page_number": page_number,
-                    "region_index": len([r for r in regions if r["docling_doc_order"] == doc_order]),
-                    "docling_doc_order": doc_order,
-                    "docling_reading_order": None,
-                    "visual_overlay_order": None,
-                    "layout_reading_order": None,
-                    "included_in_layout_reading_order": None,
-                    "reading_order_column": None,
-                    "reading_order_band": None,
-                    "reading_order_role": None,
-                    "reading_order_excluded_reason": None,
-                    "docling_self_ref": str(self_ref) if self_ref is not None else None,
-                    "docling_label": label,
-                    "type": docling_label_to_region_type(label),
-                    "content_layer": content_layer,
-                    "text": text if isinstance(text, str) else None,
-                    "orig": orig if isinstance(orig, str) else None,
-                    "score": None,
-                    "bbox_px": [float(x0), float(y0), float(x1), float(y1)],
-                    "bbox_docling": _bbox_dict(bbox),
-                    "width_px": float(x1 - x0),
-                    "height_px": float(y1 - y0),
-                    "area_px": float(bbox_area(bbox_px)),
-                    "source": "docling",
-                }
-            )
+            region = {
+                "doc_id": document_id,
+                "pdf_hash": pdf_hash,
+                "layout_region_id": f"p{page_number:04d}_d{doc_order:06d}_{provenance_index:02d}",
+                "page_number": page_number,
+                "region_index": len(
+                    [r for r in regions if r["docling_doc_order"] == doc_order]
+                ),
+                "docling_doc_order": doc_order,
+                "docling_reading_order": None,
+                "visual_overlay_order": None,
+                "layout_reading_order": None,
+                "included_in_layout_reading_order": None,
+                "reading_order_column": None,
+                "reading_order_band": None,
+                "reading_order_role": None,
+                "reading_order_excluded_reason": None,
+                "docling_self_ref": str(self_ref) if self_ref is not None else None,
+                "docling_label": label,
+                "type": docling_label_to_region_type(label),
+                "content_layer": content_layer,
+                "text": text if isinstance(text, str) else None,
+                "orig": orig if isinstance(orig, str) else None,
+                "score": None,
+                "bbox_px": [float(x0), float(y0), float(x1), float(y1)],
+                "bbox_docling": _bbox_dict(bbox),
+                "width_px": float(x1 - x0),
+                "height_px": float(y1 - y0),
+                "area_px": float(bbox_area(bbox_px)),
+                "source": "docling",
+            }
+            initialize_region_schema(region, page_record=page_map[page_number])
+            region["source_coordinate_space"] = {
+                "units": "pt",
+                "origin": (
+                    "bottom_left"
+                    if "bottom" in str(_bbox_dict(bbox).get("coord_origin", "TOPLEFT")).lower()
+                    else "top_left"
+                ),
+            }
+            regions.append(region)
     return RegionConversionResult(
-        regions, item_count, provenance_count, skipped_page_count, skipped_geometry_count
+        regions,
+        item_count,
+        provenance_count,
+        skipped_page_count,
+        skipped_geometry_count,
     )
 
 
-def convert_docling_items(raw_document: dict[str, Any], pages: PageSet) -> list[LayoutRegion]:
+def convert_docling_items(
+    raw_document: dict[str, Any], pages: PageSet
+) -> list[LayoutRegion]:
     """Compatibility wrapper for callers of the former serialized-only helper."""
     document = pages.document
     page_records = [

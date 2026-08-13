@@ -44,6 +44,7 @@ def test_safe_proposal_is_accepted_with_immutable_geometry_history():
     assert resolved["visual_crop_bbox_px"] == [100, 100, 500, 300]
     assert resolved["semantic_group_bbox_px"] == [100, 100, 500, 500]
     assert resolved["geometry_history"][1]["accepted"] is True
+    assert result.proposals[0]["proposal_schema_version"] == 1
     assert result.proposals[0]["decision"] == "accepted"
 
 
