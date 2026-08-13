@@ -17,6 +17,7 @@ from threading import RLock
 from .content_policy import apply_content_policy
 from .figure_completion import validate_figure_completions
 from .filtering.front_matter_roles import classify_page1_front_matter_roles
+from .filtering.metadata_structure import normalize_page1_metadata_structure
 from .heuristics import (
     classify_document_family,
     page1_publisher_decision,
@@ -14630,6 +14631,15 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         # seeds for expanding into adjacent affiliation list_item regions.
         page1_post_frontmatter_regions = list(filtered_regions)
 
+        # Infer metadata containers and field/value relationships before applying
+        # field-specific content policy.  This keeps scientific descriptors intact
+        # while allowing administrative-history fields to enter the secondary stream.
+        page1_metadata_result = normalize_page1_metadata_structure(
+            page1_post_frontmatter_regions, page_map, config.page1
+        )
+        page1_post_frontmatter_regions = page1_metadata_result.regions
+        page1_metadata_structure_analysis = page1_metadata_result.diagnostics
+
         # Classify valid-but-non-body publication apparatus using semantic and
         # structural evidence before the legacy footer/sidebar filters reconcile.
         page1_role_result = classify_page1_front_matter_roles(
@@ -15517,6 +15527,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         },
         "page1": {
             **page1_post_abstract_metadata_analysis,
+            "metadata_structure": page1_metadata_structure_analysis,
             "role_classification": page1_role_analysis,
         },
         "later_headers": later_page_upper_header_analysis,

@@ -78,3 +78,14 @@ def test_association_exposes_deterministic_work_counters():
         "pairs_scored": 1,
         "blocker_queries": 1,
     }
+
+
+def test_metadata_heading_caption_is_not_assigned_to_an_asset():
+    heading = region("heading", "Caption", [100, 305, 400, 340], "DOCUMENT DATA")
+    heading["semantic_role"] = "metadata_container_heading"
+
+    relationships = associate_captions(
+        [region("figure", "Figure", [100, 100, 400, 300]), heading], PAGES
+    )
+
+    assert relationships == []

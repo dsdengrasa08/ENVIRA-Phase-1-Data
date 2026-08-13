@@ -132,6 +132,14 @@ class Page1FilterConfig:
     role_cluster_max_vertical_gap: float = 0.035
     role_cluster_min_horizontal_overlap: float = 0.45
     role_max_candidate_words: int = 120
+    metadata_structure_enabled: bool = True
+    metadata_container_min_fields: int = 2
+    metadata_heading_max_words: int = 10
+    metadata_heading_max_vertical_gap: float = 0.025
+    metadata_value_min_vertical_gap: float = 0.008
+    metadata_value_max_vertical_gap: float = 0.035
+    metadata_min_horizontal_overlap: float = 0.35
+    metadata_max_left_alignment_delta: float = 0.025
 
 
 @dataclass(frozen=True)
@@ -659,6 +667,27 @@ class PipelineConfig:
             )
         if self.page1.role_max_candidate_words < 1:
             raise ValueError("page1.role_max_candidate_words must be positive")
+        if self.page1.metadata_container_min_fields < 1:
+            raise ValueError("page1.metadata_container_min_fields must be positive")
+        if self.page1.metadata_heading_max_words < 1:
+            raise ValueError("page1.metadata_heading_max_words must be positive")
+        for name in (
+            "metadata_heading_max_vertical_gap",
+            "metadata_value_min_vertical_gap",
+            "metadata_value_max_vertical_gap",
+            "metadata_min_horizontal_overlap",
+            "metadata_max_left_alignment_delta",
+        ):
+            if not 0 <= getattr(self.page1, name) <= 1:
+                raise ValueError(f"page1.{name} must be in [0, 1]")
+        if (
+            self.page1.metadata_value_min_vertical_gap
+            > self.page1.metadata_value_max_vertical_gap
+        ):
+            raise ValueError(
+                "page1.metadata_value_min_vertical_gap must not exceed "
+                "metadata_value_max_vertical_gap"
+            )
         if self.headers.min_repeat_pages < 1 or self.footer.min_repeat_pages < 1:
             raise ValueError("repeat-page thresholds must be positive")
         if self.figures.max_completion_area_multiplier < 1:
