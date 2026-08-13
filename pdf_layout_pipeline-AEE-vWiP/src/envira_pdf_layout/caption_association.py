@@ -131,7 +131,13 @@ def associate_captions(
         candidates = [
             r
             for r in page_regions
-            if r.get("type") == "Caption" or references[str(r["layout_region_id"])]
+            if (
+                r.get("semantic_role") != "metadata_container_heading"
+                and (
+                    r.get("type") == "Caption"
+                    or references[str(r["layout_region_id"])]
+                )
+            )
         ]
         metrics["caption_candidates"] += len(candidates)
         for caption in candidates:

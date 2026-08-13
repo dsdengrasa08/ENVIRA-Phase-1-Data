@@ -21,6 +21,14 @@ page1:
   role_cluster_max_vertical_gap: 0.035
   role_cluster_min_horizontal_overlap: 0.45
   role_max_candidate_words: 120
+  metadata_structure_enabled: true
+  metadata_container_min_fields: 2
+  metadata_heading_max_words: 10
+  metadata_heading_max_vertical_gap: 0.025
+  metadata_value_min_vertical_gap: 0.008
+  metadata_value_max_vertical_gap: 0.035
+  metadata_min_horizontal_overlap: 0.35
+  metadata_max_left_alignment_delta: 0.025
 headers:
   enabled: true
   roi_ocr_fallback: true
