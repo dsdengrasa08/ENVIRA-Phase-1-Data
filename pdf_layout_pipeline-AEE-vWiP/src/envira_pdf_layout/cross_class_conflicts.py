@@ -187,6 +187,137 @@ def _neighbor_context(
     }
 
 
+def _resolve_oversized_formula_boundaries(
+    working: list[LayoutRegion],
+    relationships: list[dict[str, Any]],
+    pages: dict[int, dict[str, Any]],
+    config: OverlapResolutionConfig,
+) -> tuple[set[str], list[dict[str, Any]], set[int]]:
+    """Shrink Formula edges that shallowly penetrate correct neighboring Text.
+
+    A Text centroid must remain outside the Formula and the intersection must enter
+    through exactly one Formula edge. This distinguishes adjacent prose from inline
+    text, contained annotations, and prose envelopes spanning a displayed formula.
+    All relations for one Formula are evaluated and applied as one component so the
+    result cannot depend on pair iteration order.
+    """
+    by_id = {str(region["layout_region_id"]): region for region in working}
+    by_formula: dict[
+        str, list[tuple[dict[str, Any], LayoutRegion, LayoutRegion]]
+    ] = defaultdict(list)
+    for relation in relationships:
+        sides = _formula_text_sides(relation, by_id)
+        if sides and relation.get("kind") in {
+            "CLASS_CONFLICT",
+            "CONTAINMENT_CANDIDATE",
+        }:
+            formula, text = sides
+            by_formula[str(formula["layout_region_id"])].append(
+                (relation, formula, text)
+            )
+
+    resolved_ids: set[str] = set()
+    decisions: list[dict[str, Any]] = []
+    affected_pages: set[int] = set()
+    for formula_id, conflicts in by_formula.items():
+        formula = conflicts[0][1]
+        page = pages.get(int(formula["page_number"]), {})
+        _, page_h = _page_size(page)
+        padding = config.formula_protection_padding_page_ratio * page_h
+        original = list(map(float, formula["bbox_px"]))
+        formula_h = max(1.0, original[3] - original[1])
+        proposed_top, proposed_bottom = original[1], original[3]
+        accepted: list[tuple[dict[str, Any], LayoutRegion, str, float]] = []
+
+        for relation, _, text in conflicts:
+            tb = list(map(float, text["bbox_px"]))
+            overlap_h = max(
+                0.0, min(original[3], tb[3]) - max(original[1], tb[1])
+            )
+            if overlap_h <= 0:
+                continue
+            text_center = (tb[1] + tb[3]) / 2
+            formula_center = (original[1] + original[3]) / 2
+            formula_is_left = relation["left_region_id"] == formula_id
+            horizontal_coverage = relation["features"][
+                "a_horizontal_coverage"
+                if formula_is_left
+                else "b_horizontal_coverage"
+            ]
+            shallow = (
+                overlap_h / formula_h <= config.formula_boundary_band_ratio
+                and horizontal_coverage
+                >= config.formula_min_horizontal_coverage
+            )
+            enters_top = (
+                tb[1] < original[1] < tb[3] < formula_center
+                and text_center < original[1]
+            )
+            enters_bottom = (
+                formula_center < tb[1] < original[3] < tb[3]
+                and text_center > original[3]
+            )
+            if shallow and enters_top:
+                proposed_top = max(proposed_top, tb[3] + padding)
+                accepted.append((relation, text, "top", overlap_h / formula_h))
+            elif shallow and enters_bottom:
+                proposed_bottom = min(proposed_bottom, tb[1] - padding)
+                accepted.append((relation, text, "bottom", overlap_h / formula_h))
+
+        if not accepted:
+            continue
+        resolved_bbox = [original[0], proposed_top, original[2], proposed_bottom]
+        retained_ratio = max(0.0, proposed_bottom - proposed_top) / formula_h
+        if (
+            proposed_top >= proposed_bottom
+            or retained_ratio < config.formula_boundary_min_retained_height_ratio
+            or not _valid_fragment(resolved_bbox, page, config)
+        ):
+            decisions.append(
+                {
+                    "action": "defer_ambiguous",
+                    "policy": "formula_text_v2",
+                    "formula_region_id": formula_id,
+                    "relationship_ids": [item[0]["relationship_id"] for item in accepted],
+                    "reason": "formula_boundary_correction_failed_safeguards",
+                    "retained_height_ratio": retained_ratio,
+                    "confidence": "medium",
+                }
+            )
+            continue
+
+        _set_geometry(formula, resolved_bbox, "trim_oversized_formula_boundary")
+        affected_pages.add(int(formula["page_number"]))
+        for relation, text, edge, penetration in accepted:
+            relation_id = relation["relationship_id"]
+            resolved_ids.add(relation_id)
+            relation["observed_kind"] = relation["kind"]
+            relation.update(
+                kind="FORMULA_BOUNDARY_RESOLVED",
+                status="resolved_cross_class_conflict",
+                proposed_action="trim_formula_boundary",
+                resolution_policy="formula_text_v2",
+            )
+            _clear_resolved_conflict(formula, relation_id)
+            _clear_resolved_conflict(text, relation_id)
+            decisions.append(
+                {
+                    "action": "trim_formula_boundary",
+                    "policy": "formula_text_v2",
+                    "formula_region_id": formula_id,
+                    "text_region_id": str(text["layout_region_id"]),
+                    "relationship_id": relation_id,
+                    "adjusted_edge": edge,
+                    "formula_penetration_ratio": penetration,
+                    "source_bbox_px": original,
+                    "resolved_bbox_px": list(resolved_bbox),
+                    "reason": "shallow_formula_edge_penetrates_external_text",
+                    "confidence": "high",
+                }
+            )
+    return resolved_ids, decisions, affected_pages
+
+
 def resolve_cross_class_conflicts(
     regions: list[LayoutRegion],
     relationships: list[dict[str, Any]],
@@ -202,20 +333,27 @@ def resolve_cross_class_conflicts(
     if not config.resolve_formula_text_conflicts:
         return regions, [], []
     working = deepcopy(regions)
-    by_id = {str(region["layout_region_id"]): region for region in working}
     page_map = {int(page["page_number"]): page for page in pages}
+    resolved_formula_relations, decisions, affected_pages = (
+        _resolve_oversized_formula_boundaries(
+            working, relationships, page_map, config
+        )
+    )
+    by_id = {str(region["layout_region_id"]): region for region in working}
     candidates: dict[str, list[tuple[dict[str, Any], LayoutRegion, LayoutRegion]]] = defaultdict(list)
     for relation in relationships:
         sides = _formula_text_sides(relation, by_id)
-        if sides and relation.get("kind") in {"CLASS_CONFLICT", "CONTAINMENT_CANDIDATE"}:
+        if (
+            sides
+            and relation["relationship_id"] not in resolved_formula_relations
+            and relation.get("kind") in {"CLASS_CONFLICT", "CONTAINMENT_CANDIDATE"}
+        ):
             formula, text = sides
             candidates[str(text["layout_region_id"])].append((relation, formula, text))
 
-    decisions: list[dict[str, Any]] = []
     new_regions: list[LayoutRegion] = []
     suppressed: list[LayoutRegion] = []
     suppressed_ids: set[str] = set()
-    affected_pages: set[int] = set()
     for text_id, conflicts in candidates.items():
         if len(conflicts) != 1:
             for relation, formula, text in conflicts:

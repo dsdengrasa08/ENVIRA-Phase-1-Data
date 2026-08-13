@@ -358,6 +358,7 @@ def render_overlap_resolution_overlay(
                 "CLASS_CONFLICT",
                 "AMBIGUOUS_OVERLAP",
                 "FORMULA_TEXT_BOUNDARY_RESOLVED",
+                "FORMULA_BOUNDARY_RESOLVED",
                 "CROSS_CLASS_DETECTION_SUPPRESSED",
             }:
                 lb, rb = left["bbox_px"], right["bbox_px"]

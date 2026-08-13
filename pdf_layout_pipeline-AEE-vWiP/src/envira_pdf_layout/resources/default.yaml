@@ -94,6 +94,7 @@ overlap_resolution:
   formula_split_min_fragment_height_page_ratio: 0.006
   formula_split_min_fragment_area_page_ratio: 0.0002
   formula_protection_padding_page_ratio: 0.001
+  formula_boundary_min_retained_height_ratio: 0.45
   cross_class_min_survivor_score: 0.80
   cross_class_score_margin: 0.20
 containment:

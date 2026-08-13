@@ -251,6 +251,7 @@ class OverlapResolutionConfig:
     formula_split_min_fragment_height_page_ratio: float = 0.006
     formula_split_min_fragment_area_page_ratio: float = 0.0002
     formula_protection_padding_page_ratio: float = 0.001
+    formula_boundary_min_retained_height_ratio: float = 0.45
     cross_class_min_survivor_score: float = 0.80
     cross_class_score_margin: float = 0.20
 
@@ -749,6 +750,7 @@ class PipelineConfig:
             "formula_split_min_fragment_height_page_ratio",
             "formula_split_min_fragment_area_page_ratio",
             "formula_protection_padding_page_ratio",
+            "formula_boundary_min_retained_height_ratio",
             "cross_class_min_survivor_score",
             "cross_class_score_margin",
         ):
