@@ -153,7 +153,13 @@ def _score_edge(
         return None
     if overlap < config.min_horizontal_overlap_ratio:
         return None
-    if not _column_compatible(candidate, table, page_width):
+    # Page-column labels describe normal article flow and are unreliable for a
+    # narrow caption running along a rotated table's long edge. Strong parallel
+    # overlap on a left/right table-local side is sufficient column evidence.
+    rotated_side_compatible = direction in {"left", "right"} and overlap >= 0.70
+    if not rotated_side_compatible and not _column_compatible(
+        candidate, table, page_width
+    ):
         return None
     blocker = _has_blocker(candidate, table, page_regions)
     if blocker:
@@ -218,6 +224,7 @@ def _score_edge(
             "boundary_overlap_page_ratio": round(max(0.0, -signed_gap) / axis_size, 6),
             "horizontal_overlap_ratio": round(overlap, 6),
             "reading_order_delta": order_delta,
+            "rotated_side_column_override": rotated_side_compatible,
             "components": components,
         },
         "printed_label": label_match.label if label_match else None,

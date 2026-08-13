@@ -310,6 +310,37 @@ def test_rotated_table_accepts_caption_on_table_local_side():
     assert group["associations"][0]["direction"] == "left"
 
 
+def test_rotated_caption_and_table_can_have_different_page_columns():
+    regions = [
+        region(
+            "caption",
+            "Caption",
+            [80, 100, 120, 800],
+            "Seasonal emissions by treatment.",
+            1,
+            "left",
+        ),
+        region(
+            "table-number-text",
+            "Text",
+            [30, 100, 75, 800],
+            "See Table 2 for treatment codes.",
+            2,
+            "left",
+        ),
+        region("table", "Table", [125, 100, 600, 800], order=3, column="right"),
+    ]
+
+    group = associate(regions)[0]
+    assert group["caption_side"] == "left"
+    assert group["identifier_region_ids"] == ["table-number-text"]
+    assert group["caption_region_ids"] == ["caption", "table-number-text"]
+    caption_edge = next(
+        edge for edge in group["associations"] if edge["region_id"] == "caption"
+    )
+    assert caption_edge["features"]["rotated_side_column_override"] is True
+
+
 def test_rotated_table_does_not_merge_opposite_side_detection_into_caption():
     from envira_pdf_layout.caption_overlap import build_caption_groups
 
