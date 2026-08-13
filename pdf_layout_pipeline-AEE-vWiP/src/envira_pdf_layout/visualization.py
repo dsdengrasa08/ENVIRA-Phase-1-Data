@@ -51,16 +51,16 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
         color = _COLORS.get(typ, _COLORS["Unknown"])
         cv2.rectangle(image, (x0, y0), (x1, y1), color, 3)
         if r.get("asset_association_role"):
-            prefix = f"A{r.get('asset_overlay_order','?')}"
+            prefix = f"A{r.get('asset_overlay_order', '?')}"
             label = f"{prefix} {typ}/{r['asset_association_role']} [post_body_asset]"
         else:
-            label = f"{r.get('visual_overlay_order','')} {typ}".strip()
+            label = f"{r.get('visual_overlay_order', '')} {typ}".strip()
         if r.get("synthetic_detection_method") == "caption_anchored_figure_completion":
             label += " [completed]"
         _label(image, label, (x0 + 4, max(18, y0 + 18)), color)
     _label(
         image,
-        f"Docling layout | page {page['page_number']} | article={len(page['layout_regions'])} | assets={len(page.get('post_body_asset_regions',[]))}",
+        f"Docling layout | page {page['page_number']} | article={len(page['layout_regions'])} | assets={len(page.get('post_body_asset_regions', []))}",
         (24, 36),
         (0, 0, 255),
     )
@@ -298,7 +298,9 @@ def render_caption_overlap_overlay(run, page_number, output_path: Path | None = 
     return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
 
 
-def render_overlap_resolution_overlay(run, page_number, output_path: Path | None = None):
+def render_overlap_resolution_overlay(
+    run, page_number, output_path: Path | None = None
+):
     """Render original/resolved/suppressed geometry and unresolved graph edges."""
     import cv2
 
@@ -322,10 +324,18 @@ def render_overlap_resolution_overlay(run, page_number, output_path: Path | None
         x0, y0, x1, y1 = int_bbox(tuple(source))
         cv2.rectangle(image, (x0, y0), (x1, y1), (150, 150, 150), 1, cv2.LINE_AA)
     for region in resolved.values():
-        x0, y0, x1, y1 = int_bbox(tuple(region.get("resolved_bbox_px", region["bbox_px"])))
-        color = (0, 165, 255) if region.get("resolution_status") == "ambiguous" else (40, 180, 40)
+        x0, y0, x1, y1 = int_bbox(
+            tuple(region.get("resolved_bbox_px", region["bbox_px"]))
+        )
+        color = (
+            (0, 165, 255)
+            if region.get("resolution_status") == "ambiguous"
+            else (40, 180, 40)
+        )
         cv2.rectangle(image, (x0, y0), (x1, y1), color, 2, cv2.LINE_AA)
-        _label(image, str(region["layout_region_id"]), (x0 + 3, max(18, y0 + 16)), color)
+        _label(
+            image, str(region["layout_region_id"]), (x0 + 3, max(18, y0 + 16)), color
+        )
     for region in suppressed.values():
         x0, y0, x1, y1 = int_bbox(tuple(region["bbox_px"]))
         cv2.rectangle(image, (x0, y0), (x1, y1), (80, 80, 220), 1, cv2.LINE_4)
@@ -341,6 +351,104 @@ def render_overlap_resolution_overlay(run, page_number, output_path: Path | None
             c = (int((cb[0] + cb[2]) / 2), int((cb[1] + cb[3]) / 2))
             cv2.arrowedLine(image, p, c, (220, 120, 20), 1, cv2.LINE_AA, tipLength=0.08)
     _label(image, f"Overlap resolution | page {page_number}", (24, 36), (0, 0, 255))
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
+
+
+def render_nested_hierarchy_overlay(run, page_number, output_path: Path | None = None):
+    """Render accepted hierarchy in green and ambiguous/invalid proposals in orange/red."""
+    import cv2
+
+    page = next(page for page in run.pages if page["page_number"] == page_number)
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    by_id = {
+        str(region["layout_region_id"]): region
+        for region in run.physical_regions
+        if int(region["page_number"]) == page_number
+    }
+    decisions = run.diagnostics.get("nested_hierarchy", {}).get("decisions", [])
+    for decision in decisions:
+        if int(decision.get("page_number", -1)) != page_number:
+            continue
+        parent = by_id.get(str(decision.get("parent_region_id")))
+        child = by_id.get(str(decision.get("child_region_id")))
+        if not parent or not child:
+            continue
+        color = (
+            (0, 180, 0)
+            if decision.get("action") == "accept_hierarchy"
+            else (0, 0, 220)
+            if decision.get("kind") == "INVALID_OCCLUSION"
+            else (0, 150, 255)
+        )
+        for region in (parent, child):
+            x0, y0, x1, y1 = int_bbox(tuple(region["bbox_px"]))
+            cv2.rectangle(image, (x0, y0), (x1, y1), color, 2, cv2.LINE_AA)
+        pb, cb = parent["bbox_px"], child["bbox_px"]
+        start = (int((pb[0] + pb[2]) / 2), int((pb[1] + pb[3]) / 2))
+        end = (int((cb[0] + cb[2]) / 2), int((cb[1] + cb[3]) / 2))
+        cv2.arrowedLine(image, start, end, color, 1, cv2.LINE_AA, tipLength=0.08)
+        _label(image, str(decision.get("kind")), (end[0] + 3, max(18, end[1])), color)
+    _label(image, f"Nested hierarchy | page {page_number}", (24, 36), (0, 0, 255))
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
+
+
+def render_figure_completion_overlay(run, page_number, output_path: Path | None = None):
+    """Render source/proposed geometry, newly captured regions, and hard barriers."""
+    import cv2
+
+    page = next(page for page in run.pages if page["page_number"] == page_number)
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    by_id = {
+        str(region["layout_region_id"]): region
+        for region in run.physical_regions
+        if int(region["page_number"]) == page_number
+    }
+    proposals = (
+        run.diagnostics.get("figure_completion", {})
+        .get("validation", {})
+        .get("proposals", [])
+    )
+    for proposal in proposals:
+        if int(proposal["page_number"]) != page_number:
+            continue
+        source = int_bbox(tuple(proposal["source_bbox_px"]))
+        proposed = int_bbox(tuple(proposal["proposed_bbox_px"]))
+        color = (
+            (0, 180, 0)
+            if proposal["decision"].startswith("accepted")
+            else (0, 0, 220)
+            if proposal["decision"].startswith("rejected")
+            else (0, 150, 255)
+        )
+        cv2.rectangle(image, source[:2], source[2:], (150, 150, 150), 2, cv2.LINE_AA)
+        cv2.rectangle(image, proposed[:2], proposed[2:], color, 3, cv2.LINE_AA)
+        _label(
+            image,
+            proposal["decision"],
+            (proposed[0] + 3, max(18, proposed[1] + 16)),
+            color,
+        )
+        for region_id in proposal["newly_captured_region_ids"]:
+            region = by_id.get(str(region_id))
+            if region:
+                box = int_bbox(tuple(region["bbox_px"]))
+                region_color = (
+                    (0, 0, 255)
+                    if region_id in proposal["barrier_region_ids"]
+                    else (255, 180, 0)
+                )
+                cv2.rectangle(image, box[:2], box[2:], region_color, 2, cv2.LINE_AA)
+    _label(image, f"Figure completion | page {page_number}", (24, 36), (0, 0, 255))
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_path), image)
