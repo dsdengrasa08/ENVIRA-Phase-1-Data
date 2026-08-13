@@ -37,12 +37,20 @@ def update_golden(
     previous = (
         json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
     )
+    environment_digests = {
+        row["environment_sha256"]
+        for row in trace
+        if row.get("environment_sha256")
+    }
+    if len(environment_digests) > 1:
+        raise ValueError("trace contains multiple execution environments")
     golden = {
         "golden_schema_version": GOLDEN_SCHEMA_VERSION,
         "trace_schema_version": TRACE_SCHEMA_VERSION,
         "fixture_id": fixture_id,
         "reason": reason,
         "stage_digests": {row["stage"]: row["region_digest"] for row in trace},
+        "environment_sha256": next(iter(environment_digests), None),
         "validation": validation,
     }
     output.parent.mkdir(parents=True, exist_ok=True)

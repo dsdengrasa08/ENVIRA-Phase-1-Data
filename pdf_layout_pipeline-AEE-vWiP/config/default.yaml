@@ -6,6 +6,8 @@ docling:
   do_ocr: false
   do_table_structure: true
   do_formula_enrichment: true
+  require_model_manifest: true
+  model_download_timeout_seconds: 900
 page1:
   abstract_aliases: [Abstract, Summary]
 headers:

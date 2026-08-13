@@ -47,6 +47,8 @@ uses `_EXPORTING` while files are replaced atomically, and writes exactly one te
 marker last so consumers never treat an in-progress publication as complete.
 Security limits, private file modes, secret redaction, raw-content controls, and the
 untrusted-input deployment model are documented in [`SECURITY.md`](SECURITY.md).
+Dependency locking, clean-wheel verification, model manifests, SBOMs, and runtime
+fingerprints are documented in [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md).
 
 The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the

@@ -1,6 +1,11 @@
 """ENVIRA PDF layout extraction and inspection pipeline."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("envira-pdf-layout")
+except PackageNotFoundError:  # source checkout before installation
+    from ._version import __version__
 
 from .config import PipelineConfig
 from .pipeline import run_layout_pipeline

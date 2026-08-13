@@ -38,3 +38,16 @@ def test_golden_update_refuses_failed_invariant_without_force(tmp_path):
     row["invariants"]["partition_valid"] = False
     with pytest.raises(ValueError, match="invalid trace"):
         update_golden(tmp_path / "golden.json", [row], fixture_id="case", reason="bad")
+
+
+def test_golden_records_one_execution_environment(tmp_path):
+    row = snapshot("final", [region()])
+    row["environment_sha256"] = "a" * 64
+    output = tmp_path / "golden.json"
+    update_golden(output, [row], fixture_id="case", reason="pinned environment")
+    assert json.loads(output.read_text())["environment_sha256"] == "a" * 64
+
+    other = snapshot("next", [region()])
+    other["environment_sha256"] = "b" * 64
+    with pytest.raises(ValueError, match="multiple execution environments"):
+        update_golden(output, [row, other], fixture_id="case", reason="mixed")

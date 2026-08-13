@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "envira-pdf-layout"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Auditable PDF layout extraction pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,11 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7"]
+test = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7", "packaging>=24,<26"]
 notebook = ["jupyterlab>=4,<5"]
 ocr = ["pytesseract>=0.3.10,<1"]
 model = []
-dev = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7", "jupyterlab>=4,<5", "pytesseract>=0.3.10,<1"]
+dev = ["pytest>=8,<9", "build>=1,<2", "twine>=5,<7", "packaging>=24,<26", "jupyterlab>=4,<5", "pytesseract>=0.3.10,<1"]
 
 [project.scripts]
 envira-pdf-layout = "envira_pdf_layout.cli:main"
@@ -38,6 +38,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 envira_pdf_layout = ["resources/*.yaml", "resources/*.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "envira_pdf_layout._version.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

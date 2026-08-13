@@ -93,6 +93,7 @@ def run_pdf(
     from .pdf_io import prepare_pages
     from .pipeline import run_layout_pipeline
     from .runtime import prepare_runtime
+    from .supply_chain import environment_fingerprint
 
     prepare_runtime(config.runtime)
     document = prepare_document_context(config)
@@ -143,7 +144,17 @@ def run_pdf(
             "source_pdf_sha256": document.pdf_sha256,
             "remote_services_allowed": config.security.allow_remote_services,
             "remote_services_verified_disabled": not config.security.allow_remote_services,
+            "model_verification": models.get("verification"),
+            "backend_capabilities": backend.capabilities,
         }
+        fingerprint = environment_fingerprint(
+            config_sha256=effective_config_sha256(config),
+            model=models.get("verification"),
+            capabilities=backend.capabilities,
+        )
+        result.diagnostics["environment_fingerprint"] = fingerprint
+        for stage in result.stage_trace:
+            stage["environment_sha256"] = fingerprint["environment_sha256"]
         export_pipeline_result(result)
         validation = validate_exported_artifacts(target, config.security)
         if not validation["valid"]:

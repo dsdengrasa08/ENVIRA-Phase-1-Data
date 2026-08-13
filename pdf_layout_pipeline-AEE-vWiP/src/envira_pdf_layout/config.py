@@ -111,6 +111,9 @@ class DoclingConfig:
     do_formula_enrichment: bool = True
     do_code_enrichment: bool = False
     code_formula_preset: str = "codeformulav2"
+    model_manifest_path: Path | None = None
+    require_model_manifest: bool = True
+    model_download_timeout_seconds: int = 900
 
 
 @dataclass(frozen=True)
@@ -571,6 +574,12 @@ class PipelineConfig:
             raise ValueError("render_dpi must be positive")
         if self.docling.min_model_size_mb < 0:
             raise ValueError("docling min_model_size_mb must be non-negative")
+        if self.docling.model_download_timeout_seconds < 1:
+            raise ValueError("docling.model_download_timeout_seconds must be positive")
+        if self.docling.auto_download_models and self.security.allow_remote_services is False:
+            raise ValueError(
+                "docling.auto_download_models requires security.allow_remote_services"
+            )
         for section_name in (
             "page1",
             "headers",

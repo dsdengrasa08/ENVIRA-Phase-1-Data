@@ -25,8 +25,9 @@ def docling_document_to_dict(document: Any) -> dict[str, Any]:
 
 
 class DoclingBackend:
-    def __init__(self, converter: Any):
+    def __init__(self, converter: Any, capabilities: dict[str, Any] | None = None):
         self.converter = converter
+        self.capabilities = capabilities or {}
 
     @classmethod
     def from_config(
@@ -55,6 +56,15 @@ class DoclingBackend:
             raise RuntimeError(
                 "installed Docling cannot verify that remote services are disabled"
             )
+        capabilities = {
+            "remote_services": "allowed" if security.allow_remote_services else "verified_disabled",
+            "ocr": {"requested": config.do_ocr, "configured": bool(getattr(options, "do_ocr", False))},
+            "table_structure": {"requested": config.do_table_structure, "configured": bool(getattr(options, "do_table_structure", False))},
+            "formula_enrichment": {"requested": config.do_formula_enrichment, "configured": False},
+            "code_enrichment": {"requested": config.do_code_enrichment, "configured": False},
+            "code_formula_preset": config.code_formula_preset,
+            "local_artifacts": bool(artifact_path and config.use_local_artifacts),
+        }
         if config.do_formula_enrichment or config.do_code_enrichment:
             try:
                 CodeFormulaVlmOptions = getattr(
@@ -64,10 +74,12 @@ class DoclingBackend:
                 options.code_formula_options = CodeFormulaVlmOptions.from_preset(
                     config.code_formula_preset
                 )
-            except Exception:
-                # Match the reference's version-tolerant behavior: older Docling
-                # releases may not expose the enrichment option class.
-                pass
+                capabilities["formula_enrichment"]["configured"] = config.do_formula_enrichment
+                capabilities["code_enrichment"]["configured"] = config.do_code_enrichment
+            except (ImportError, AttributeError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "requested Docling code/formula enrichment is unavailable"
+                ) from exc
         if (
             artifact_path
             and config.use_local_artifacts
@@ -78,7 +90,7 @@ class DoclingBackend:
             allowed_formats=[InputFormat.PDF],
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
         )
-        return cls(converter)
+        return cls(converter, capabilities)
 
     def convert(self, pdf_path: Path, page_range: tuple[int, int]) -> DoclingConversion:
         result = self.converter.convert(str(pdf_path), page_range=page_range)
