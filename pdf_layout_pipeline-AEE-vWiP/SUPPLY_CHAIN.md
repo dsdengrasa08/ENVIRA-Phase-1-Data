@@ -18,6 +18,13 @@ based on that verified inventory—not filename suffixes or directory size. Down
 timeout and staging directory; only a verified set is atomically promoted, preserving the
 known-good set until verification succeeds.
 
+For compatibility with model caches created before manifests existed (including the
+original Google Drive/Colab cache), `bootstrap_legacy_model_manifest` defaults to `true`.
+On the first run only, the pipeline inventories and hashes the existing cache, writes the
+manifest atomically, labels its provenance as local trust-on-first-use, and then validates
+it normally. Later modifications fail closed. Set this option to `false` in deployments
+that require a separately approved manifest and do not permit local bootstrapping.
+
 Every application run records the full installed distribution inventory digest, verified
 model-manifest and model-file-set digests, backend capability record, effective-config
 digest, Python/platform identity, and a canonical environment fingerprint. Regression

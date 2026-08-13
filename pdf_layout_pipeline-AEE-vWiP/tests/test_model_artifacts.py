@@ -50,3 +50,31 @@ def test_model_acquisition_lock_rejects_concurrent_writer(tmp_path):
             with _acquisition_lock(model_dir):
                 pass
     assert not (tmp_path / "models.download.lock").exists()
+
+
+def test_legacy_model_cache_is_bootstrapped_once_and_then_verified(tmp_path):
+    (tmp_path / "weights.bin").write_bytes(b"legacy-model")
+    config = DoclingConfig(artifacts_dir=tmp_path, min_model_size_mb=0)
+
+    first = ensure_model_artifacts(config)
+    second = ensure_model_artifacts(config)
+
+    assert first["ready"] is second["ready"] is True
+    assert first["bootstrapped_manifest"] is True
+    assert second["bootstrapped_manifest"] is False
+    assert first["verification"]["model_set"] == "legacy-local-cache"
+    manifest = json.loads((tmp_path / "model-manifest.json").read_text())
+    assert manifest["provenance"] == "locally_bootstrapped_trust_on_first_use"
+
+
+def test_legacy_bootstrap_can_be_disabled_for_strict_deployments(tmp_path):
+    (tmp_path / "weights.bin").write_bytes(b"unapproved-model")
+    with pytest.raises(FileNotFoundError, match="missing or incomplete"):
+        ensure_model_artifacts(
+            DoclingConfig(
+                artifacts_dir=tmp_path,
+                min_model_size_mb=0,
+                bootstrap_legacy_model_manifest=False,
+            )
+        )
+    assert not (tmp_path / "model-manifest.json").exists()

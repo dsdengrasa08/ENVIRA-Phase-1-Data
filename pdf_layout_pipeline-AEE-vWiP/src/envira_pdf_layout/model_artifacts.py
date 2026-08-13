@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
+import json
 import os
 import shutil
 import subprocess
@@ -52,6 +54,56 @@ def list_candidate_model_files(path: Path, limit: int = 20) -> list[Path]:
     )
 
 
+def bootstrap_model_manifest(path: Path, manifest_path: Path) -> dict[str, object]:
+    """Create a one-time integrity baseline for a pre-manifest local model cache.
+
+    This is deliberately trust-on-first-use: it makes subsequent modifications
+    detectable without pretending that an existing Colab/Drive cache was obtained
+    from a cryptographically authenticated publisher.
+    """
+    candidates = [item for item in path.rglob("*") if item.is_file()]
+    candidates = [
+        item
+        for item in candidates
+        if item.resolve() != manifest_path.resolve()
+    ]
+    if not candidates:
+        raise FileNotFoundError(f"No model files are available to inventory at {path}")
+    files = []
+    from .security import sha256_file
+
+    for item in sorted(candidates, key=lambda candidate: candidate.relative_to(path).as_posix()):
+        if item.is_symlink():
+            raise ValueError(f"Cannot bootstrap a manifest containing a symlink: {item}")
+        files.append(
+            {
+                "path": item.relative_to(path).as_posix(),
+                "bytes": item.stat().st_size,
+                "sha256": sha256_file(item),
+            }
+        )
+    try:
+        backend_version = version("docling")
+    except PackageNotFoundError:
+        backend_version = "unknown"
+    manifest = {
+        "model_manifest_schema_version": 1,
+        "backend": "docling",
+        "backend_version": backend_version,
+        "model_set": "legacy-local-cache",
+        "provenance": "locally_bootstrapped_trust_on_first_use",
+        "files": files,
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = manifest_path.with_name(manifest_path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.chmod(temporary, 0o600)
+    temporary.replace(manifest_path)
+    return manifest
+
+
 def ensure_model_artifacts(config: DoclingConfig) -> dict[str, object]:
     path = (
         Path(config.artifacts_dir or "artifacts/docling_models").expanduser().resolve()
@@ -60,8 +112,20 @@ def ensure_model_artifacts(config: DoclingConfig) -> dict[str, object]:
     manifest_path = Path(config.model_manifest_path or path / "model-manifest.json")
     size = folder_size_mb(path)
     verification = None
+    bootstrapped_manifest = False
     if manifest_path.is_file():
         verification = validate_model_manifest(path, manifest_path)
+    elif (
+        config.require_model_manifest
+        and config.bootstrap_legacy_model_manifest
+        and size >= config.min_model_size_mb
+        and list_candidate_model_files(path, 1)
+    ):
+        with _acquisition_lock(path):
+            if not manifest_path.is_file():
+                bootstrap_model_manifest(path, manifest_path)
+        verification = validate_model_manifest(path, manifest_path)
+        bootstrapped_manifest = True
     ready = bool(verification) and size >= config.min_model_size_mb
     if not config.require_model_manifest and not ready:
         ready = bool(list_candidate_model_files(path)) and size >= config.min_model_size_mb
@@ -103,4 +167,5 @@ def ensure_model_artifacts(config: DoclingConfig) -> dict[str, object]:
         "ready": ready,
         "preview": list_candidate_model_files(path, 10),
         "verification": verification,
+        "bootstrapped_manifest": bootstrapped_manifest,
     }

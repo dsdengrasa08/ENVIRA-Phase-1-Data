@@ -113,6 +113,7 @@ class DoclingConfig:
     code_formula_preset: str = "codeformulav2"
     model_manifest_path: Path | None = None
     require_model_manifest: bool = True
+    bootstrap_legacy_model_manifest: bool = True
     model_download_timeout_seconds: int = 900
 
 
