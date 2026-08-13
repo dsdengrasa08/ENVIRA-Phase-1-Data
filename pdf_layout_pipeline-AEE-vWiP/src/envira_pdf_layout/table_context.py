@@ -9,7 +9,13 @@ from typing import Any
 from .config import TableContextConfig
 from .types import LayoutRegion
 from .region_index import RegionIndex
-from .orientation import compatible_orientation, local_relation, region_orientation
+from .orientation import (
+    compatible_orientation,
+    interval_overlap_ratio,
+    local_relation,
+    project_bbox,
+    region_orientation,
+)
 from .semantic_caption import (
     body_reference_evidence,
     find_table_reference_mention,
@@ -655,6 +661,27 @@ def _reference_fragment_edge(
         gap = float(relation["gap"]) / scale
         alignment = float(relation["overlap"])
         orientation_relation = "normalized_axis_continuation"
+        # Detector fragments at a caption boundary frequently overlap by a few
+        # pixels on both local axes.  Such boxes have no strict before/after
+        # relation, but are still one continuous external caption lane.  Measure
+        # both local-axis overlaps rather than dropping the semantic identifier.
+        if relation["side"] is None:
+            local_candidate = project_bbox(cb, angle)
+            local_member = project_bbox(mb, angle)
+            inline_overlap = interval_overlap_ratio(
+                local_candidate.inline_min,
+                local_candidate.inline_max,
+                local_member.inline_min,
+                local_member.inline_max,
+            )
+            block_overlap = interval_overlap_ratio(
+                local_candidate.block_min,
+                local_candidate.block_max,
+                local_member.block_min,
+                local_member.block_max,
+            )
+            alignment = max(inline_overlap, block_overlap)
+            orientation_relation = "normalized_boundary_overlap"
     else:
         opposite_long_sides = (
             caption_side == "left"

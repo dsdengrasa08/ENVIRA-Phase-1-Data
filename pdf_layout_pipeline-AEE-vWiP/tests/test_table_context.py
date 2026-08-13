@@ -631,3 +631,43 @@ def test_rotated_table_cell_identifier_is_not_caption_content():
     group = associate(regions)[0]
     assert "cell" not in group["identifier_region_ids"]
     assert "cell" not in group["caption_region_ids"]
+
+
+def test_compact_identifier_overlapping_rotated_caption_boundary_is_grouped():
+    """A small detector boundary overlap must not strand the Table label as Text."""
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "identifier",
+            "Text",
+            [64, 315, 78, 340],
+            "Table 2.",
+            3,
+            orientation=90,
+        ),
+        region(
+            "caption",
+            "Caption",
+            [72, 20, 84, 320],
+            "Seasonal emissions under different treatments.",
+            1,
+            orientation=90,
+        ),
+        region("table", "Table", [85, 20, 495, 320], order=2),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["identifier_region_ids"] == ["identifier"]
+    assert group["caption_region_ids"] == ["caption", "identifier"]
+    edge = next(
+        edge for edge in group["associations"] if edge["region_id"] == "identifier"
+    )
+    assert edge["features"]["orientation_relation"] == "normalized_boundary_overlap"
+
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["identifier", "caption"]
+    assert caption["text"] == (
+        "Table 2. Seasonal emissions under different treatments."
+    )
