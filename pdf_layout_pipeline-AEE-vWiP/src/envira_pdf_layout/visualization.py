@@ -58,7 +58,9 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
             label = f"{r.get('visual_overlay_order', '')} {typ}".strip()
         if r.get("synthetic_detection_method") == "caption_anchored_figure_completion":
             label += " [completed]"
-        elif r.get("synthetic_detection_method") == "caption_visual_figure_decomposition":
+        elif (
+            r.get("synthetic_detection_method") == "caption_visual_figure_decomposition"
+        ):
             label += " [decomposed]"
         _label(image, label, (x0 + 4, max(18, y0 + 18)), color)
     _label(
@@ -130,6 +132,25 @@ def _semantic_display_regions(run, page):
         if not members:
             continue
         boxes = [list(map(float, member["bbox_px"])) for member in members]
+        if group.get("bbox_spans_table"):
+            for part_index, (member, box) in enumerate(zip(members, boxes), 1):
+                regions.append(
+                    {
+                        "layout_region_id": f"{group['resolved_region_id']}:part{part_index}",
+                        "page_number": page_number,
+                        "type": "Caption",
+                        "text": member.get("text") or member.get("orig") or "",
+                        "bbox_px": box,
+                        "visual_overlay_order": int(
+                            member.get("resolved_reading_order") or 10**9
+                        ),
+                        "source_region_ids": member.get(
+                            "source_region_ids", [member["layout_region_id"]]
+                        ),
+                        "resolution_action": "semantic_caption_group_part",
+                    }
+                )
+            continue
         regions.append(
             {
                 "layout_region_id": group["resolved_region_id"],
@@ -197,7 +218,9 @@ def render_figure_decomposition_overlay(
         for box in proposal.get("proposed_bbox_px", []):
             child = int_bbox(tuple(box))
             cv2.rectangle(image, child[:2], child[2:], color, 3, cv2.LINE_AA)
-        _label(image, proposal["decision"], (source[0] + 3, max(18, source[1] + 16)), color)
+        _label(
+            image, proposal["decision"], (source[0] + 3, max(18, source[1] + 16)), color
+        )
     _label(image, f"Figure decomposition | page {page_number}", (24, 36), (0, 0, 255))
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,13 +408,18 @@ def render_overlap_resolution_overlay(
         else:
             left = resolved.get(str(relationship.get("left_region_id")))
             right = resolved.get(str(relationship.get("right_region_id")))
-            if left and right and relationship.get("kind") in {
-                "CLASS_CONFLICT",
-                "AMBIGUOUS_OVERLAP",
-                "FORMULA_TEXT_BOUNDARY_RESOLVED",
-                "FORMULA_BOUNDARY_RESOLVED",
-                "CROSS_CLASS_DETECTION_SUPPRESSED",
-            }:
+            if (
+                left
+                and right
+                and relationship.get("kind")
+                in {
+                    "CLASS_CONFLICT",
+                    "AMBIGUOUS_OVERLAP",
+                    "FORMULA_TEXT_BOUNDARY_RESOLVED",
+                    "FORMULA_BOUNDARY_RESOLVED",
+                    "CROSS_CLASS_DETECTION_SUPPRESSED",
+                }
+            ):
                 lb, rb = left["bbox_px"], right["bbox_px"]
                 start = (int((lb[0] + lb[2]) / 2), int((lb[1] + lb[3]) / 2))
                 end = (int((rb[0] + rb[2]) / 2), int((rb[1] + rb[3]) / 2))

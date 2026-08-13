@@ -72,5 +72,62 @@ def test_semantic_display_hides_nested_children_but_physical_view_retains_them()
         ],
         caption_groups=[],
     )
-    assert [r["layout_region_id"] for r in _semantic_display_regions(run, {"page_number": 1})] == ["figure"]
+    assert [
+        r["layout_region_id"]
+        for r in _semantic_display_regions(run, {"page_number": 1})
+    ] == ["figure"]
     assert len(run.resolved_regions) == 2
+
+
+def test_semantic_display_keeps_cross_table_caption_members_as_separate_boxes():
+    run = SimpleNamespace(
+        resolved_regions=[
+            {
+                "layout_region_id": "caption-left",
+                "page_number": 1,
+                "type": "Caption",
+                "text": "Caption description",
+                "bbox_px": [10, 10, 40, 300],
+                "resolved_reading_order": 1,
+                "emission_policy": "emit_canonical",
+            },
+            {
+                "layout_region_id": "table-number-right",
+                "page_number": 1,
+                "type": "Text",
+                "text": "See Table 2 for treatment codes",
+                "bbox_px": [310, 10, 340, 300],
+                "resolved_reading_order": 3,
+                "emission_policy": "emit_canonical",
+            },
+            {
+                "layout_region_id": "table",
+                "page_number": 1,
+                "type": "Table",
+                "bbox_px": [45, 10, 305, 300],
+                "resolved_reading_order": 2,
+                "emission_policy": "emit_canonical",
+            },
+        ],
+        caption_groups=[
+            {
+                "resolved_region_id": "table-1:caption",
+                "page_number": 1,
+                "text": "See Table 2 for treatment codes Caption description",
+                "ordered_source_region_ids": ["table-number-right", "caption-left"],
+                "source_region_ids": ["table-number-right", "caption-left"],
+                "bbox_spans_table": True,
+            }
+        ],
+    )
+
+    regions = _semantic_display_regions(run, {"page_number": 1})
+    caption_parts = [region for region in regions if region["type"] == "Caption"]
+    assert [region["bbox_px"] for region in caption_parts] == [
+        [10.0, 10.0, 40.0, 300.0],
+        [310.0, 10.0, 340.0, 300.0],
+    ]
+    assert all(
+        box[2] <= 45 or box[0] >= 305
+        for box in (region["bbox_px"] for region in caption_parts)
+    )
