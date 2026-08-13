@@ -4,10 +4,24 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, NotRequired, Required, TypedDict
 
-BBox: TypeAlias = tuple[float, float, float, float]
-LayoutRegion: TypeAlias = dict[str, Any]
+BBox = tuple[float, float, float, float]
+
+
+class LayoutRegion(TypedDict, total=False):
+    region_schema_version: Required[int]
+    layout_region_id: Required[str]
+    page_number: Required[int]
+    type: Required[str]
+    bbox_px: Required[list[float]]
+    source_bbox_px: NotRequired[list[float]]
+    resolved_bbox_px: NotRequired[list[float]]
+    physical_bbox_px: NotRequired[list[float]]
+    visual_crop_bbox_px: NotRequired[list[float]]
+    semantic_group_bbox_px: NotRequired[list[float]]
+    geometry_version: NotRequired[int]
+    geometry_history: NotRequired[list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -32,6 +46,15 @@ class ArtifactPaths:
     layout_relationships_jsonl: Path
     resolution_decisions_jsonl: Path
     suppressed_regions_jsonl: Path
+    effective_config_json: Path
+    diagnostics_json: Path
+    physical_regions_jsonl: Path
+    top_level_regions_jsonl: Path
+    nested_regions_jsonl: Path
+    figure_completion_proposals_jsonl: Path
+    stage_trace_jsonl: Path
+    page_diagnostics_jsonl: Path
+    artifact_manifest_json: Path
     summary_csv: Path
 
 
@@ -41,6 +64,7 @@ class DocumentIdentity:
     pdf_path: Path
     original_name: str
     pdf_hash: str
+    pdf_sha256: str
     doc_id: str
     total_pages: int
     page_start: int
@@ -105,6 +129,17 @@ class PipelineResult:
     layout_relationships: list[dict[str, Any]] = field(default_factory=list)
     resolution_decisions: list[dict[str, Any]] = field(default_factory=list)
     suppressed_regions: list[LayoutRegion] = field(default_factory=list)
+    physical_regions: list[LayoutRegion] = field(default_factory=list)
+    top_level_regions: list[LayoutRegion] = field(default_factory=list)
+    nested_regions: list[LayoutRegion] = field(default_factory=list)
+    filtered_regions: list[LayoutRegion] = field(default_factory=list)
+    semantic_groups: list[dict[str, Any]] = field(default_factory=list)
+    stage_trace: list[dict[str, Any]] = field(default_factory=list)
+    status: str = "complete"
+    failed_pages: list[int] = field(default_factory=list)
+    issues: list[dict[str, Any]] = field(default_factory=list)
+    completed_stages: list[str] = field(default_factory=list)
+    failed_stages: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
