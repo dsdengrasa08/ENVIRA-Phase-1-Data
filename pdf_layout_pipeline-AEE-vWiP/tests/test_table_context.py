@@ -308,3 +308,48 @@ def test_rotated_table_accepts_caption_on_table_local_side():
     group = associate(regions)[0]
     assert group["identifier_region_ids"] == ["identifier"]
     assert group["associations"][0]["direction"] == "left"
+
+
+def test_rotated_table_does_not_merge_opposite_side_detection_into_caption():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region(
+            "caption-left",
+            "Text",
+            [80, 100, 120, 800],
+            "Table 2. Seasonal emissions by treatment",
+            1,
+        ),
+        region("table", "Table", [125, 100, 600, 800], order=2),
+        region(
+            "note-right",
+            "Caption",
+            [605, 100, 650, 800],
+            "Values in parentheses represent standard errors",
+            3,
+        ),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["caption_side"] == "left"
+    assert group["identifier_region_ids"] == ["caption-left"]
+    assert "note-right" not in group["caption_region_ids"]
+
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["caption-left"]
+    assert caption["bbox_px"] == [80.0, 100.0, 120.0, 800.0]
+    assert caption["bbox_px"][2] < group["table_bbox"][0]
+
+
+def test_fragmented_identifier_cannot_be_synthesized_across_table():
+    regions = [
+        region("word", "Text", [80, 100, 120, 800], "Table", 1),
+        region("table", "Table", [125, 100, 600, 800], order=2),
+        region("number", "Text", [605, 100, 650, 800], "4. Results", 3),
+    ]
+
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == []
+    assert group["caption_region_ids"] == []

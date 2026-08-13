@@ -52,6 +52,12 @@ def _vertical_overlap_ratio(a: list[float], b: list[float]) -> float:
     return overlap / max(1.0, min(a[3] - a[1], b[3] - b[1]))
 
 
+def _intersection_area(a: list[float], b: list[float]) -> float:
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(
+        0.0, min(a[3], b[3]) - max(a[1], b[1])
+    )
+
+
 def _column_compatible(
     candidate: LayoutRegion, table: LayoutRegion, page_width: float
 ) -> bool:
@@ -374,7 +380,10 @@ def _group_bbox(regions: list[LayoutRegion]) -> list[float]:
 
 
 def _fragmented_identifier_candidates(
-    page_regions: list[LayoutRegion], page_width: float, page_height: float
+    page_regions: list[LayoutRegion],
+    tables: list[LayoutRegion],
+    page_width: float,
+    page_height: float,
 ) -> list[LayoutRegion]:
     """Build provenance-only virtual anchors from two or three adjacent text boxes."""
     text_regions = [
@@ -397,6 +406,18 @@ def _fragmented_identifier_candidates(
             ):
                 continue
             boxes = [list(map(float, member["bbox_px"])) for member in members]
+            union_bbox = _group_bbox(members)
+            # Never synthesize one semantic anchor from detections on opposite
+            # sides of a table. Its union would paint a caption across the asset.
+            if any(
+                _intersection_area(union_bbox, list(map(float, table["bbox_px"]))) > 0
+                and not any(
+                    _intersection_area(box, list(map(float, table["bbox_px"]))) > 0
+                    for box in boxes
+                )
+                for table in tables
+            ):
+                continue
             vertical_gap = max(box[1] for box in boxes) - min(box[3] for box in boxes)
             horizontal_gap = max(box[0] for box in boxes) - min(box[2] for box in boxes)
             if (
@@ -418,7 +439,7 @@ def _fragmented_identifier_candidates(
                 + "+".join(str(m["layout_region_id"]) for m in members),
                 type="Text",
                 text=combined,
-                bbox_px=_group_bbox(members),
+                bbox_px=union_bbox,
                 width_px=max(box[2] for box in boxes) - min(box[0] for box in boxes),
                 height_px=max(box[3] for box in boxes) - min(box[1] for box in boxes),
                 semantic_source_region_ids=[
@@ -429,6 +450,35 @@ def _fragmented_identifier_candidates(
             output.append(virtual)
             claimed.update(member_ids)
     return output
+
+
+def _retain_one_caption_side(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one coherent caption lane per table while retaining independent notes.
+
+    Rotated tables commonly have a caption on one long edge and notes on the
+    opposite edge. Combining detector-class Caption boxes from both sides makes
+    the semantic union cross the table. A leading table identifier is the
+    authoritative side anchor; otherwise the strongest caption edge selects the
+    lane. Source detections on other sides remain untouched and ungrouped.
+    """
+    captions_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge["proposed_role"] == "caption":
+            captions_by_table[str(edge["table_region_id"])].append(edge)
+
+    selected_side: dict[str, str] = {}
+    for table_id, caption_edges in captions_by_table.items():
+        anchors = [edge for edge in caption_edges if edge.get("printed_label")]
+        pool = anchors or caption_edges
+        winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
+        selected_side[table_id] = str(winner["direction"])
+
+    return [
+        edge
+        for edge in edges
+        if edge["proposed_role"] != "caption"
+        or edge["direction"] == selected_side.get(str(edge["table_region_id"]))
+    ]
 
 
 def _caption_table_corridor_edge(
@@ -542,7 +592,7 @@ def associate_table_context(
         )
         width, height = index.page_sizes.get(page_number, (1.0, 1.0))
         page_regions = source_page_regions + _fragmented_identifier_candidates(
-            source_page_regions, width, height
+            source_page_regions, tables, width, height
         )
         metrics["tables"] += len(tables)
         page_groups: dict[str, dict[str, Any]] = {}
@@ -555,6 +605,7 @@ def associate_table_context(
                 "table_bbox": list(table["bbox_px"]),
                 "identifier_region_ids": [],
                 "caption_region_ids": [],
+                "caption_side": None,
                 "note_region_ids": [],
                 "printed_label": None,
                 "associations": [],
@@ -592,6 +643,8 @@ def associate_table_context(
                         edges.append(edge)
                         metrics["scored_edges"] += 1
 
+        edges = _retain_one_caption_side(edges)
+
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:
             candidates[edge["region_id"]].append(edge)
@@ -611,6 +664,7 @@ def associate_table_context(
                 "semantic_source_region_ids", [region_id]
             )
             if winner["proposed_role"] == "caption":
+                group["caption_side"] = winner["direction"]
                 if winner["printed_label"]:
                     group["identifier_region_ids"].extend(source_ids)
                     group["printed_label"] = (
