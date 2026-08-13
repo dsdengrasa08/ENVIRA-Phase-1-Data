@@ -9,6 +9,7 @@ filenames, hashes, or document-specific exceptions.
 | Page-1 upper | Exclude furniture | normalized upper-band geometry and title/body anchors | generic geometry/structure | yes | protected title and body anchors |
 | Page-1 upper | Confirm publisher furniture | named publisher term profile | publisher-specific lexical | yes | must agree with geometry/structure in `confirmatory` mode |
 | Page-1 lower | Exclude metadata | lower-page position, short clusters, contact/affiliation terms | scholarly structure and English lexical | yes | paragraph/body protections |
+| Page-1 roles | Secondary stream | front-matter/body anchors plus date-sequence or legal semantics | scholarly structure and language lexical | yes | multi-signal confidence, prose and scientific-role protections, retain-on-ambiguity |
 | Later headers | Exclude header | top-band position, recurrence, source-PDF row geometry | generic geometry/recurrence | yes | caption/asset and body protections |
 | Header ROI OCR | Supply fallback evidence | OCR only when the source text layer has no plausible shallow line | generic extraction fallback | no | typed controls, validated ROI, per-ROI cache, categorized failures, dependency-only circuit breaker, diagnostics |
 | Figure completion | Expand asset | caption assignment, image ink bands, blockers | generic geometry/structure | yes | barriers and minimum-score controls |

@@ -16,6 +16,11 @@ operational:
   retain_private_traceback: false
 page1:
   abstract_aliases: [Abstract, Summary]
+  role_classification_enabled: true
+  role_min_confidence: 0.78
+  role_cluster_max_vertical_gap: 0.035
+  role_cluster_min_horizontal_overlap: 0.45
+  role_max_candidate_words: 120
 headers:
   enabled: true
   roi_ocr_fallback: true

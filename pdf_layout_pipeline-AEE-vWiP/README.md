@@ -325,3 +325,12 @@ document-family signals, and content-policy decisions are exported in
 for references, acknowledgements, declarations, appendices, supplementary sections,
 and front matter are configured separately from layout-noise correction. See
 `HEURISTICS.md` for the active destructive-rule inventory and safeguards.
+
+Page-one publication apparatus is classified as a document role before reading
+order is assigned. Article-history groups require lifecycle/date structure, while
+publisher/legal notices require legal semantics; both must also occur in a compact
+front-matter context before a detected scientific body heading. Scientific prose,
+abstracts, keywords, captions, tables, figures, formulas, and references are
+protected, and ambiguous candidates remain in the main stream. High-confidence
+roles are preserved in the auditable secondary stream with their evidence and
+confidence rather than discarded as layout noise.
