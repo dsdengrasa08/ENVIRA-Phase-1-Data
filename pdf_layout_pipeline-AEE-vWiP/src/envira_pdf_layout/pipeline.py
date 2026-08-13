@@ -248,6 +248,7 @@ def run_layout_pipeline(conversion, page_set, config):
             "new_candidate_ids": sorted(proposal_ids - previous_ids),
         },
     }
+    started = perf_counter()
     if config.table_context.enabled:
         table_metrics: dict[str, int] = {}
         table_run = execute_stage(
