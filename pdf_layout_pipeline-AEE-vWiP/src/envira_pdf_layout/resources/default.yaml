@@ -82,6 +82,21 @@ overlap_resolution:
   fragment_max_gap_page_ratio: 0.012
   boundary_overlap_ratio: 0.20
   preserve_authoritative_nested_regions: true
+  # Formula/Text conflicts are resolved only when asymmetric coverage, block
+  # geometry, and valid residual Text regions agree. Ambiguous/inline cases are
+  # retained unchanged and remain visible in relationship diagnostics.
+  resolve_formula_text_conflicts: true
+  formula_min_coverage: 0.55
+  formula_min_horizontal_coverage: 0.45
+  formula_block_min_width_page_ratio: 0.08
+  formula_inline_max_height_page_ratio: 0.018
+  formula_boundary_band_ratio: 0.35
+  formula_split_min_fragment_height_page_ratio: 0.006
+  formula_split_min_fragment_area_page_ratio: 0.0002
+  formula_protection_padding_page_ratio: 0.001
+  formula_boundary_min_retained_height_ratio: 0.45
+  cross_class_min_survivor_score: 0.80
+  cross_class_score_margin: 0.20
 containment:
   strong_child_coverage: 0.92
   center_child_coverage: 0.72

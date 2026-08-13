@@ -228,3 +228,128 @@ def test_sweep_line_prunes_separated_regions_before_feature_scoring():
         [{"page_number": 1, "image_width_px": 100, "image_height_px": 2000}],
     )
     assert result.diagnostics["pairs_scored"] < len(regions)
+
+
+def test_formula_text_boundary_penetration_trims_text_not_formula():
+    result = resolve_layout_overlaps(
+        [
+            region("text", "Text", [100, 100, 700, 260], "prose above"),
+            region("formula", "Formula", [180, 210, 620, 290], "x = y"),
+        ],
+        PAGES,
+    )
+    by_id = {r["layout_region_id"]: r for r in result.regions}
+    assert by_id["text"]["bbox_px"][3] < by_id["formula"]["bbox_px"][1]
+    assert by_id["formula"]["bbox_px"] == [180, 210, 620, 290]
+    assert by_id["text"]["source_bbox_px"] == [100, 100, 700, 260]
+    assert result.relationships[0]["kind"] == "FORMULA_TEXT_BOUNDARY_RESOLVED"
+    assert result.relationships[0]["observed_kind"] == "CLASS_CONFLICT"
+    assert result.decisions[-1]["action"] == "trim_text_bottom"
+
+
+def test_formula_contained_in_line_addressable_text_splits_provenance_safely():
+    result = resolve_layout_overlaps(
+        [
+            region("text", "Text", [100, 100, 700, 500], "above line\nbelow line"),
+            region("formula", "Formula", [180, 240, 620, 340], "x = y"),
+        ],
+        PAGES,
+    )
+    text_regions = [r for r in result.regions if r["type"] == "Text"]
+    assert len(text_regions) == 2
+    assert [r["text"] for r in sorted(text_regions, key=lambda r: r["bbox_px"][1])] == [
+        "above line",
+        "below line",
+    ]
+    assert all("text" in r["source_region_ids"] for r in text_regions)
+    assert all(r["source_bbox_px"] == [100, 100, 700, 500] for r in text_regions)
+    assert result.decisions[-1]["action"] == "split_text_around_semantic_region"
+
+
+def test_contained_formula_with_unaddressable_prose_defers_without_duplication():
+    original = region("text", "Text", [100, 100, 700, 500], "one unsplittable paragraph")
+    result = resolve_layout_overlaps(
+        [original, region("formula", "Formula", [180, 240, 620, 340], "x = y")],
+        PAGES,
+    )
+    assert len(result.regions) == 2
+    assert next(r for r in result.regions if r["type"] == "Text")["bbox_px"] == original["bbox_px"]
+    assert result.decisions[-1]["action"] == "defer_ambiguous"
+    assert result.decisions[-1]["reason"] == "text_payload_not_line_addressable"
+
+
+def test_inline_formula_is_retained_without_geometry_changes():
+    inputs = [
+        region("text", "Text", [100, 100, 800, 135], "value x equals y in prose"),
+        region("formula", "Formula", [300, 105, 390, 130], "x=y"),
+    ]
+    result = resolve_layout_overlaps(inputs, PAGES)
+    assert [r["bbox_px"] for r in result.regions] == [r["bbox_px"] for r in inputs]
+    assert result.decisions[-1]["action"] == "keep_both"
+
+
+def test_multiple_formula_intervals_defer_as_one_order_independent_conflict_set():
+    inputs = [
+        region("text", "Text", [100, 100, 700, 600], "top\nmiddle\nbottom"),
+        region("f1", "Formula", [180, 220, 620, 280], "x=y"),
+        region("f2", "Equation", [180, 400, 620, 460], "a=b"),
+    ]
+    result = resolve_layout_overlaps(inputs, PAGES)
+    assert len(result.regions) == 3
+    assert next(r for r in result.regions if r["type"] == "Text")["bbox_px"] == inputs[0]["bbox_px"]
+    assert {d["reason"] for d in result.decisions} == {
+        "multiple_formula_intervals_require_joint_resolution"
+    }
+
+
+def test_near_identical_formula_text_disagreement_uses_scores_when_available():
+    result = resolve_layout_overlaps(
+        [
+            region("text", "Text", [100, 100, 600, 200], "x = y", score=0.40),
+            region("formula", "Formula", [101, 100, 599, 201], "x = y", score=0.95),
+        ],
+        PAGES,
+    )
+    assert [r["layout_region_id"] for r in result.regions] == ["formula"]
+    assert [r["layout_region_id"] for r in result.suppressed] == ["text"]
+    assert result.relationships[0]["kind"] == "CROSS_CLASS_DETECTION_SUPPRESSED"
+    assert result.decisions[-1]["action"] == "suppress_lower_confidence_detection"
+
+
+def test_oversized_formula_is_trimmed_between_correct_neighboring_text_boxes():
+    inputs = [
+        region("above", "Text", [100, 100, 700, 210], "prose above", order=1),
+        region("formula", "Formula", [100, 195, 700, 315], "x = y", order=2),
+        region("below", "Text", [100, 300, 700, 400], "prose below", order=3),
+    ]
+    result = resolve_layout_overlaps(inputs, PAGES)
+    by_id = {item["layout_region_id"]: item for item in result.regions}
+
+    assert by_id["above"]["bbox_px"] == inputs[0]["bbox_px"]
+    assert by_id["below"]["bbox_px"] == inputs[2]["bbox_px"]
+    assert by_id["formula"]["source_bbox_px"] == inputs[1]["bbox_px"]
+    assert by_id["formula"]["bbox_px"] == [100.0, 211.0, 700.0, 299.0]
+    assert by_id["formula"]["resolution_action"] == "trim_oversized_formula_boundary"
+    assert {relation["kind"] for relation in result.relationships} == {
+        "FORMULA_BOUNDARY_RESOLVED"
+    }
+    assert {decision["adjusted_edge"] for decision in result.decisions} == {
+        "top",
+        "bottom",
+    }
+
+
+def test_formula_boundary_trim_rejects_text_containing_formula_center():
+    inputs = [
+        region("text", "Text", [100, 100, 800, 300], "prose containing inline math"),
+        region("formula", "Formula", [300, 180, 500, 220], "x=y"),
+    ]
+    result = resolve_layout_overlaps(inputs, PAGES)
+
+    assert [item["bbox_px"] for item in result.regions] == [
+        item["bbox_px"] for item in inputs
+    ]
+    assert all(
+        decision["action"] != "trim_formula_boundary"
+        for decision in result.decisions
+    )

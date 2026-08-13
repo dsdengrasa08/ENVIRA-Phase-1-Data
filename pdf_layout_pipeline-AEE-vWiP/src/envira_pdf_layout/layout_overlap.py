@@ -15,6 +15,7 @@ import re
 from typing import Any, Iterable
 
 from .config import ContainmentConfig, OverlapResolutionConfig
+from .cross_class_conflicts import resolve_cross_class_conflicts
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
 
@@ -404,6 +405,10 @@ def resolve_layout_overlaps(
         else:
             region["resolution_status"] = "resolved"
         output.append(region)
+    output, cross_class_decisions, cross_class_suppressed = resolve_cross_class_conflicts(
+        output, relationships, pages, config
+    )
+    decisions.extend(cross_class_decisions)
     # Stable provisional order only; hierarchy owns child emission and local order.
     out_pages: dict[int, list[LayoutRegion]] = defaultdict(list)
     for region in output:
@@ -421,6 +426,7 @@ def resolve_layout_overlaps(
             top_order += 1
             region["resolved_reading_order"] = top_order
     suppressed = [deepcopy(by_id[rid]) for rid in duplicate_of]
+    suppressed.extend(cross_class_suppressed)
     return ResolutionResult(
         output,
         relationships,
@@ -431,6 +437,7 @@ def resolve_layout_overlaps(
             "pairs_scored": pairs_scored,
             "relationships_emitted": len(relationships),
             "duplicate_edges": len(duplicate_edges),
+            "cross_class_decisions": len(cross_class_decisions),
         },
     )
 
