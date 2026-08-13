@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import Any
-from .config import DoclingConfig
+from .config import DoclingConfig, SecurityConfig
 
 
 @dataclass
@@ -30,7 +30,10 @@ class DoclingBackend:
 
     @classmethod
     def from_config(
-        cls, config: DoclingConfig, artifact_path: Path | None = None
+        cls,
+        config: DoclingConfig,
+        artifact_path: Path | None = None,
+        security: SecurityConfig | None = None,
     ) -> "DoclingBackend":
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -45,8 +48,13 @@ class DoclingBackend:
         }.items():
             if hasattr(options, key):
                 setattr(options, key, value)
+        security = security or SecurityConfig()
         if hasattr(options, "enable_remote_services"):
             options.enable_remote_services = False
+        elif not security.allow_remote_services:
+            raise RuntimeError(
+                "installed Docling cannot verify that remote services are disabled"
+            )
         if config.do_formula_enrichment or config.do_code_enrichment:
             try:
                 CodeFormulaVlmOptions = getattr(

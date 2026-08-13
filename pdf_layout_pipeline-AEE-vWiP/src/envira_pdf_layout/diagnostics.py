@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import pandas as pd
+from .stage_trace import tabular_trace
 
 
 def stage_exclusions(run, stage):
@@ -23,7 +24,8 @@ def header_diagnostics(run):
 
 
 def figure_completion_diagnostics(run):
-    return stage_diagnostics(run, "figure_completion")
+    validation = run.diagnostics.get("figure_completion", {}).get("validation", {})
+    return pd.DataFrame(validation.get("proposals", []))
 
 
 def footer_diagnostics(run):
@@ -73,3 +75,44 @@ def overlap_resolution_diagnostics(run, page_number=None):
         if page_number is None or relationship["page_number"] == page_number
     ]
     return pd.DataFrame(rows)
+
+
+def nested_hierarchy_diagnostics(run, page_number=None):
+    """Return accepted and ambiguous non-destructive containment decisions."""
+    rows = run.diagnostics.get("nested_hierarchy", {}).get("decisions", [])
+    if page_number is not None:
+        rows = [row for row in rows if row.get("page_number") == page_number]
+    return pd.DataFrame(rows)
+
+
+def stage_trace_diagnostics(run):
+    """Return compact before/after counts and invariants for every major stage."""
+    return pd.DataFrame(tabular_trace(run.stage_trace))
+
+
+def pipeline_issues_dataframe(run):
+    """Return structured warnings/errors with stage and page context."""
+    return pd.DataFrame(run.issues)
+
+
+def failed_pages_dataframe(run):
+    """Return one row for every failed page and its associated issues."""
+    return pd.DataFrame(
+        [
+            {
+                "page_number": page_number,
+                "issues": [
+                    issue
+                    for issue in run.issues
+                    if issue.get("page_number") == page_number
+                ],
+            }
+            for page_number in run.failed_pages
+        ]
+    )
+
+
+def stage_failures_dataframe(run):
+    return pd.DataFrame(
+        [{"stage": stage, "run_status": run.status} for stage in run.failed_stages]
+    )
