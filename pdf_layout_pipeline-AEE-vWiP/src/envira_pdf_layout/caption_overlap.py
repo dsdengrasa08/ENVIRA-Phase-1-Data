@@ -14,13 +14,8 @@ from typing import Any
 from .config import CaptionOverlapConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
+from .semantic_caption import parse_semantic_caption_reference
 
-_IDENTIFIER_RE = re.compile(
-    r"^\s*(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
-    r"(?:table|tab\.)\s+(?:[A-Z](?:[.\-]?\d+)?|[IVXLCDM]+|\d+(?:[.\-]\w+)?)"
-    r"(?:\s*[:.\-])?(?:\s+|$)",
-    re.IGNORECASE,
-)
 _CAPTION_TYPES = {"Caption"}
 _TEXT_LIKE_TYPES = {"Caption", "Text", "Footnote", "Section-header", "Title", "List"}
 _ASSET_TYPES = {"Table", "Figure"}
@@ -44,7 +39,8 @@ def _caption_like(region: LayoutRegion) -> bool:
 
 def _is_caption_candidate(region: LayoutRegion) -> bool:
     return region.get("type") in _CAPTION_TYPES or bool(
-        _IDENTIFIER_RE.match(_text(region))
+        (reference := parse_semantic_caption_reference(_text(region)))
+        and reference.kind == "table"
     )
 
 
@@ -424,6 +420,13 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
         ordered = sorted(
             member_ids,
             key=lambda rid: (
+                0
+                if rid in identifier_ids
+                or (
+                    (reference := parse_semantic_caption_reference(_text(by_id[rid])))
+                    and reference.kind == "table"
+                )
+                else 1,
                 int(by_id[rid].get("layout_reading_order") or 10**9),
                 float(by_id[rid]["bbox_px"][1]),
                 float(by_id[rid]["bbox_px"][0]),
@@ -455,7 +458,7 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
         source_boxes = [
             list(map(float, by_id[region_id]["bbox_px"])) for region_id in ordered
         ]
-        union_bbox = (
+        full_union_bbox = (
             [
                 min(box[0] for box in source_boxes),
                 min(box[1] for box in source_boxes),
@@ -463,6 +466,48 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 max(box[3] for box in source_boxes),
             ]
             if source_boxes
+            else None
+        )
+        parent_region = by_id.get(str(table["table_region_id"]), {})
+        table_bbox = list(
+            map(float, table.get("table_bbox") or parent_region.get("bbox_px") or [])
+        )
+        bbox_spans_table = bool(
+            full_union_bbox
+            and len(table_bbox) == 4
+            and max(
+                0.0,
+                min(full_union_bbox[2], table_bbox[2])
+                - max(full_union_bbox[0], table_bbox[0]),
+            )
+            * max(
+                0.0,
+                min(full_union_bbox[3], table_bbox[3])
+                - max(full_union_bbox[1], table_bbox[1]),
+            )
+            > 0
+        )
+        caption_side = table.get("caption_side")
+        side_boxes = [
+            box
+            for box in source_boxes
+            if len(table_bbox) == 4
+            and (
+                (caption_side == "left" and box[2] <= table_bbox[0])
+                or (caption_side == "right" and box[0] >= table_bbox[2])
+                or (caption_side == "above" and box[3] <= table_bbox[1])
+                or (caption_side == "below" and box[1] >= table_bbox[3])
+            )
+        ]
+        display_boxes = side_boxes if bbox_spans_table and side_boxes else source_boxes
+        union_bbox = (
+            [
+                min(box[0] for box in display_boxes),
+                min(box[1] for box in display_boxes),
+                max(box[2] for box in display_boxes),
+                max(box[3] for box in display_boxes),
+            ]
+            if display_boxes
             else None
         )
 
@@ -500,6 +545,8 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
                 "role": "table_caption",
                 "type": "Table Caption",
                 "bbox_px": union_bbox,
+                "bbox_parts": source_boxes,
+                "bbox_spans_table": bbox_spans_table,
                 "identifier_region_ids": identifier_ids,
                 "caption_fragment_region_ids": caption_ids,
                 "ordered_source_region_ids": ordered,
