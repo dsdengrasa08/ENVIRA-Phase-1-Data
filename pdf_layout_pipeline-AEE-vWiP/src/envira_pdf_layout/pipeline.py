@@ -9,9 +9,20 @@ from time import perf_counter
 from .caption_overlap import build_caption_groups
 from .caption_association import associate_captions
 from .artifact_validation import validate_relationship_graph
+from .failures import (
+    PipelineIssue,
+    PipelineStageError,
+    derive_run_status,
+    execute_stage,
+    page_failure_budget_exceeded,
+)
 from .independent_core import run_independent_core
-from .layout_overlap import resolve_layout_overlaps
-from .nested_containment import analyze_nested_containment, resolve_nested_hierarchy
+from .layout_overlap import ResolutionResult, resolve_layout_overlaps
+from .nested_containment import (
+    HierarchyResult,
+    analyze_nested_containment,
+    resolve_nested_hierarchy,
+)
 from .stage_trace import snapshot, validate_trace
 from .table_context import associate_table_context
 from .region_index import RegionIndex
@@ -21,6 +32,7 @@ def run_layout_pipeline(conversion, page_set, config):
     """Run the independent layout core, then infer logical table groups."""
     started = perf_counter()
     result = run_independent_core(conversion, page_set, config)
+    _collect_core_page_failures(result, config)
     core_snapshot = snapshot(
         "independent_core",
         result.final_regions,
@@ -29,6 +41,12 @@ def run_layout_pipeline(conversion, page_set, config):
     result.stage_trace = [core_snapshot]
     result.filtered_regions = result.final_regions
     result.diagnostics["effective_config"] = config.to_dict()
+    result.diagnostics["document"] = {
+        "doc_id": result.document.doc_id,
+        "pdf_hash": result.document.pdf_hash,
+        "page_start": result.document.page_start,
+        "page_end": result.document.page_end,
+    }
     try:
         docling_version = version("docling")
     except PackageNotFoundError:
@@ -49,13 +67,21 @@ def run_layout_pipeline(conversion, page_set, config):
         },
     }
     resolution_input = list(result.final_regions)
-    started = perf_counter()
-    resolution = resolve_layout_overlaps(
-        resolution_input,
-        result.pages,
-        config.overlap_resolution,
-        config.containment,
+    resolution_run = execute_stage(
+        name="overlap_resolution",
+        operation=lambda: resolve_layout_overlaps(
+            resolution_input,
+            result.pages,
+            config.overlap_resolution,
+            config.containment,
+        ),
+        fallback=lambda: ResolutionResult(
+            list(resolution_input), [], [], [], {"fallback": "retain_core_regions"}
+        ),
+        fallback_name="retain_core_regions",
+        mode=config.error_policy.mode,
     )
+    resolution = resolution_run.value
     result.resolved_regions = resolution.regions
     result.layout_relationships = list(resolution.relationships)
     result.resolution_decisions = resolution.decisions
@@ -66,22 +92,42 @@ def run_layout_pipeline(conversion, page_set, config):
         previous=core_snapshot,
         relationships=result.layout_relationships,
         decisions=result.resolution_decisions,
-        elapsed_ms=(perf_counter() - started) * 1000,
+        elapsed_ms=resolution_run.elapsed_ms,
+        status=resolution_run.status,
     )
+    overlap_snapshot["fallback"] = resolution_run.fallback
+    if resolution_run.issue:
+        result.issues.append(resolution_run.issue.to_dict())
+        result.failed_stages.append("overlap_resolution")
+    else:
+        result.completed_stages.append("overlap_resolution")
     result.stage_trace.append(overlap_snapshot)
     region_index = RegionIndex.build(result.resolved_regions, result.pages)
     containment_metrics: dict[str, int] = {}
-    started = perf_counter()
-    proposals = analyze_nested_containment(
-        result.resolved_regions,
-        result.layout_relationships,
-        config=config.containment,
-        index=region_index,
-        metrics=containment_metrics,
+    hierarchy_run = execute_stage(
+        name="nested_hierarchy",
+        operation=lambda: _run_hierarchy(
+            result.resolved_regions,
+            result.layout_relationships,
+            config,
+            region_index,
+            containment_metrics,
+        ),
+        fallback=lambda: (
+            [],
+            HierarchyResult(
+                list(result.resolved_regions),
+                [],
+                [],
+                list(result.resolved_regions),
+                [],
+                {"fallback": "retain_all_top_level"},
+            ),
+        ),
+        fallback_name="retain_all_top_level",
+        mode=config.error_policy.mode,
     )
-    hierarchy = resolve_nested_hierarchy(
-        result.resolved_regions, proposals, config.containment
-    )
+    proposals, hierarchy = hierarchy_run.value
     result.resolved_regions = hierarchy.regions
     result.physical_regions = hierarchy.regions
     result.top_level_regions = hierarchy.top_level_regions
@@ -92,8 +138,15 @@ def run_layout_pipeline(conversion, page_set, config):
         previous=overlap_snapshot,
         relationships=hierarchy.relationships,
         decisions=hierarchy.decisions,
-        elapsed_ms=(perf_counter() - started) * 1000,
+        elapsed_ms=hierarchy_run.elapsed_ms,
+        status=hierarchy_run.status,
     )
+    hierarchy_snapshot["fallback"] = hierarchy_run.fallback
+    if hierarchy_run.issue:
+        result.issues.append(hierarchy_run.issue.to_dict())
+        result.failed_stages.append("nested_hierarchy")
+    else:
+        result.completed_stages.append("nested_hierarchy")
     hierarchy_snapshot["top_level_count"] = len(result.top_level_regions)
     hierarchy_snapshot["nested_count"] = len(result.nested_regions)
     hierarchy_snapshot["invariants"]["partition_valid"] = len(
@@ -112,23 +165,36 @@ def run_layout_pipeline(conversion, page_set, config):
     # Backward-compatible caption inspection now receives authoritative rather
     # than provisional containment outcomes.
     result.caption_overlap_relationships = list(result.layout_relationships)
-    started = perf_counter()
     caption_metrics: dict[str, int] = {}
-    semantic_associations = associate_captions(
-        result.resolved_regions,
-        result.pages,
-        config=config.caption_association,
-        index=region_index,
-        metrics=caption_metrics,
+    caption_run = execute_stage(
+        name="caption_association",
+        operation=lambda: associate_captions(
+            result.resolved_regions,
+            result.pages,
+            config=config.caption_association,
+            index=region_index,
+            metrics=caption_metrics,
+        ),
+        fallback=lambda: [],
+        fallback_name="retain_captions_unattached",
+        mode=config.error_policy.mode,
     )
+    semantic_associations = caption_run.value
     result.layout_relationships.extend(semantic_associations)
     caption_snapshot = snapshot(
         "caption_association",
         result.resolved_regions,
         previous=hierarchy_snapshot,
         relationships=semantic_associations,
-        elapsed_ms=(perf_counter() - started) * 1000,
+        elapsed_ms=caption_run.elapsed_ms,
+        status=caption_run.status,
     )
+    caption_snapshot["fallback"] = caption_run.fallback
+    if caption_run.issue:
+        result.issues.append(caption_run.issue.to_dict())
+        result.failed_stages.append("caption_association")
+    else:
+        result.completed_stages.append("caption_association")
     result.stage_trace.append(caption_snapshot)
     caption_snapshot["work"] = caption_metrics
     result.diagnostics["caption_association"] = {
@@ -185,15 +251,27 @@ def run_layout_pipeline(conversion, page_set, config):
     started = perf_counter()
     if config.table_context.enabled:
         table_metrics: dict[str, int] = {}
-        result.logical_tables = associate_table_context(
-            result.resolved_regions,
-            result.pages,
-            document_id=result.document.doc_id,
-            config=config.table_context,
-            relationships=result.layout_relationships,
-            index=region_index,
-            metrics=table_metrics,
+        table_run = execute_stage(
+            name="table_context",
+            operation=lambda: associate_table_context(
+                result.resolved_regions,
+                result.pages,
+                document_id=result.document.doc_id,
+                config=config.table_context,
+                relationships=result.layout_relationships,
+                index=region_index,
+                metrics=table_metrics,
+            ),
+            fallback=lambda: [],
+            fallback_name="omit_logical_tables",
+            mode=config.error_policy.mode,
         )
+        result.logical_tables = table_run.value
+        if table_run.issue:
+            result.issues.append(table_run.issue.to_dict())
+            result.failed_stages.append("table_context")
+        else:
+            result.completed_stages.append("table_context")
         groups_by_page: dict[int, list[dict]] = {}
         for group in result.logical_tables:
             groups_by_page.setdefault(group["page_number"], []).append(group)
@@ -208,26 +286,44 @@ def run_layout_pipeline(conversion, page_set, config):
             ],
             "work": table_metrics,
         }
-        table_elapsed_ms = (perf_counter() - started) * 1000
-        started = perf_counter()
-        result.caption_groups = build_caption_groups(
-            result.resolved_regions,
-            result.logical_tables,
-            result.caption_overlap_relationships,
-            result.pages,
-            config.caption_overlap,
+        table_elapsed_ms = table_run.elapsed_ms
+        caption_group_run = execute_stage(
+            name="caption_grouping",
+            operation=lambda: build_caption_groups(
+                result.resolved_regions,
+                result.logical_tables,
+                result.caption_overlap_relationships,
+                result.pages,
+                config.caption_overlap,
+            ),
+            fallback=lambda: [],
+            fallback_name="omit_caption_groups",
+            mode=config.error_policy.mode,
         )
+        result.caption_groups = caption_group_run.value
         result.semantic_groups = result.caption_groups
-        caption_group_elapsed_ms = (perf_counter() - started) * 1000
+        caption_group_elapsed_ms = caption_group_run.elapsed_ms
+        if caption_group_run.issue:
+            result.issues.append(caption_group_run.issue.to_dict())
+            result.failed_stages.append("caption_grouping")
+        else:
+            result.completed_stages.append("caption_grouping")
     else:
         table_elapsed_ms = 0.0
         caption_group_elapsed_ms = 0.0
+        table_run = caption_group_run = None
+    semantic_status = (
+        "failed_recovered"
+        if any(run and run.issue for run in (table_run, caption_group_run))
+        else "completed"
+    )
     final_snapshot = snapshot(
         "semantic_grouping",
         result.resolved_regions,
         previous=caption_snapshot,
         relationships=result.layout_relationships,
-        elapsed_ms=(perf_counter() - started) * 1000,
+        elapsed_ms=table_elapsed_ms + caption_group_elapsed_ms,
+        status=semantic_status,
     )
     final_snapshot["logical_table_count"] = len(result.logical_tables)
     final_snapshot["caption_group_count"] = len(result.caption_groups)
@@ -243,6 +339,17 @@ def run_layout_pipeline(conversion, page_set, config):
         "validation": validate_trace(result.stage_trace),
         "stages": result.stage_trace,
     }
+    result.status = derive_run_status(
+        [_issue_from_dict(issue) for issue in result.issues], result.failed_pages
+    )
+    result.diagnostics["run_completeness"] = {
+        "run_status": result.status,
+        "failed_pages": result.failed_pages,
+        "completed_stages": result.completed_stages,
+        "failed_stages": result.failed_stages,
+        "issues": result.issues,
+        "artifacts_complete": result.status in {"complete", "complete_with_warnings"},
+    }
     return result
 
 
@@ -251,3 +358,55 @@ def _package_version(package: str) -> str:
         return version(package)
     except PackageNotFoundError:
         return "unknown"
+
+
+def _run_hierarchy(regions, relationships, config, index, metrics):
+    proposals = analyze_nested_containment(
+        regions,
+        relationships,
+        config=config.containment,
+        index=index,
+        metrics=metrics,
+    )
+    return proposals, resolve_nested_hierarchy(regions, proposals, config.containment)
+
+
+def _issue_from_dict(value):
+    return PipelineIssue(**{**value, "region_ids": tuple(value.get("region_ids", ()))})
+
+
+def _collect_core_page_failures(result, config):
+    failures = result.diagnostics.get("later_headers", {}).get(
+        "pdf_roi_ocr_error_pages", []
+    )
+    for failure in failures:
+        page_number = int(failure["page_number"])
+        if page_number not in result.failed_pages:
+            result.failed_pages.append(page_number)
+        result.issues.append(
+            PipelineIssue(
+                severity="error",
+                category="page_ocr_failure",
+                stage="header_roi_ocr",
+                page_number=page_number,
+                message=str(failure.get("error") or "ROI OCR failed"),
+                retryable=True,
+            ).to_dict()
+        )
+    if page_failure_budget_exceeded(
+        result.failed_pages,
+        len(result.pages),
+        max_pages=config.error_policy.max_failed_pages,
+        max_ratio=config.error_policy.max_failed_page_ratio,
+    ):
+        issue = PipelineIssue(
+            severity="fatal",
+            category="page_failure_budget_exceeded",
+            stage="independent_core",
+            message="page failure budget exceeded",
+            retryable=False,
+        )
+        if config.error_policy.mode == "strict":
+            raise PipelineStageError(issue)
+        result.issues.append(issue.to_dict())
+        result.failed_stages.append("independent_core")

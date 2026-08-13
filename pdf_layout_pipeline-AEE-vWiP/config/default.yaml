@@ -76,6 +76,13 @@ containment:
   panel_label_max_chars: 12
   body_paragraph_min_chars: 80
   caption_identifier_max_chars: 24
+error_policy:
+  mode: strict
+  page_failure: continue
+  stage_failure: stop
+  export_partial_results: true
+  max_failed_pages: 3
+  max_failed_page_ratio: 0.10
 heuristics:
   # Publisher terms are data-only evidence and cannot delete content without
   # corroborating generic geometry/structure in confirmatory mode.

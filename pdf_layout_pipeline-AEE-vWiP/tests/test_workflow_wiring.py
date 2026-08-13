@@ -35,3 +35,6 @@ def test_workflow_displays_resolved_caption_outputs():
     assert "figure_completion_geometry_summary_dataframe" in source
     assert "stage_trace_dataframe" in source
     assert "stage_trace_diagnostics" in source
+    assert "pipeline_issues_dataframe" in source
+    assert "failed_pages_dataframe" in source
+    assert "stage_failures_dataframe" in source

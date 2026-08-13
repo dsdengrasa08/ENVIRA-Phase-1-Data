@@ -255,6 +255,18 @@ class ExportConfig:
 
 
 @dataclass(frozen=True)
+class ErrorPolicyConfig:
+    """Failure behavior for package-owned stages and page-isolated work."""
+
+    mode: str = "strict"
+    page_failure: str = "continue"
+    stage_failure: str = "stop"
+    export_partial_results: bool = True
+    max_failed_pages: int = 3
+    max_failed_page_ratio: float = 0.10
+
+
+@dataclass(frozen=True)
 class HeuristicProfileConfig:
     """Optional lexical profiles; generic geometry remains authoritative."""
 
@@ -301,6 +313,7 @@ class PipelineConfig:
     )
     containment: ContainmentConfig = field(default_factory=ContainmentConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+    error_policy: ErrorPolicyConfig = field(default_factory=ErrorPolicyConfig)
     heuristics: HeuristicProfileConfig = field(default_factory=HeuristicProfileConfig)
     content_policy: ContentPolicyConfig = field(default_factory=ContentPolicyConfig)
     exclude_labels: frozenset[str] = frozenset()
@@ -335,6 +348,7 @@ class PipelineConfig:
             "overlap_resolution": OverlapResolutionConfig,
             "containment": ContainmentConfig,
             "export": ExportConfig,
+            "error_policy": ErrorPolicyConfig,
             "heuristics": HeuristicProfileConfig,
             "content_policy": ContentPolicyConfig,
         }
@@ -652,3 +666,13 @@ class PipelineConfig:
             raise ValueError("headers roi_ocr_dpi must be at least 72")
         if not self.headers.roi_ocr_language.strip():
             raise ValueError("headers roi_ocr_language must not be empty")
+        if self.error_policy.mode not in {"strict", "report"}:
+            raise ValueError("error_policy mode must be strict or report")
+        if self.error_policy.page_failure not in {"continue", "stop"}:
+            raise ValueError("error_policy page_failure must be continue or stop")
+        if self.error_policy.stage_failure not in {"continue", "stop"}:
+            raise ValueError("error_policy stage_failure must be continue or stop")
+        if self.error_policy.max_failed_pages < 0:
+            raise ValueError("error_policy max_failed_pages must be non-negative")
+        if not 0 <= self.error_policy.max_failed_page_ratio <= 1:
+            raise ValueError("error_policy max_failed_page_ratio must be in [0, 1]")

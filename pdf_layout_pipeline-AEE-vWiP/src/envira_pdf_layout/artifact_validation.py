@@ -72,6 +72,8 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
         "nested_layout_regions.jsonl": "jsonl",
         "layout_relationships.jsonl": "jsonl",
         "stage_trace.jsonl": "jsonl",
+        "page_diagnostics.jsonl": "jsonl",
+        "artifact_manifest.json": "json",
     }
     errors = []
     loaded: dict[str, Any] = {}
@@ -104,4 +106,21 @@ def validate_exported_artifacts(document_dir: Path) -> dict[str, Any]:
             errors.append(
                 {"artifact": "stage_trace.jsonl", "error": "unsupported_schema"}
             )
+    manifest = loaded.get("artifact_manifest.json", {})
+    if manifest and manifest.get("schema_version") != 1:
+        errors.append(
+            {"artifact": "artifact_manifest.json", "error": "unsupported_schema"}
+        )
+    if manifest:
+        for item in manifest.get("files", []):
+            path = document_dir / item["path"]
+            if not path.is_file():
+                errors.append(
+                    {"artifact": item["path"], "error": "manifest_file_missing"}
+                )
+                continue
+            import hashlib
+
+            if hashlib.sha256(path.read_bytes()).hexdigest() != item.get("sha256"):
+                errors.append({"artifact": item["path"], "error": "hash_mismatch"})
     return {"valid": not errors, "errors": errors, "artifacts": sorted(loaded)}

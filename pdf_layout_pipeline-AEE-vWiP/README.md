@@ -89,6 +89,19 @@ contracts, and reserve `pytest -m model` for scheduled/model-backed environments
 Committed fixtures are repository-generated JSON contracts and contain no
 third-party PDF content; private evaluation PDFs should remain in private CI jobs.
 
+## Failure policy and partial results
+
+`error_policy` selects `strict` or `report` behavior for package-owned stages.
+Strict mode raises a structured `PipelineStageError`; report mode records a
+`PipelineIssue`, marks the run partial, and uses only declared conservative
+fallbacks (retain core regions, retain all hierarchy regions at top level, or
+leave captions unattached). Results expose status, failed pages/stages, completed
+stages, and issues. Exports use atomic per-file replacement, emit page diagnostics
+and a hashed manifest, and finish with exactly one `_SUCCESS`, `_PARTIAL`, or
+`_FAILED` marker so an incomplete directory cannot masquerade as a successful run.
+`retry.build_retry_plan` reads page diagnostics and permits selective retry only
+when the source PDF hash and effective configuration match the prior run.
+
 ## Generalized overlap resolution
 
 The maintained pipeline resolves overlaps after the preserved core filters and

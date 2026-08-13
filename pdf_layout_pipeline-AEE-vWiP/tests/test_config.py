@@ -5,6 +5,7 @@ from envira_pdf_layout.config import (
     ContainmentConfig,
     DocumentConfig,
     HeaderFilterConfig,
+    ErrorPolicyConfig,
     OverlapResolutionConfig,
     PipelineConfig,
     TableContextConfig,
@@ -206,3 +207,12 @@ def test_default_profile_loads_caption_association_controls():
         config.value_sources["caption_association.acceptance_score"]
         == f"profile:{profile.resolve()}"
     )
+
+
+def test_invalid_error_policy_is_rejected():
+    with pytest.raises(ValueError, match="error_policy mode"):
+        PipelineConfig(error_policy=ErrorPolicyConfig(mode="guess")).validate()
+    with pytest.raises(ValueError, match="max_failed_page_ratio"):
+        PipelineConfig(
+            error_policy=ErrorPolicyConfig(max_failed_page_ratio=1.1)
+        ).validate()

@@ -48,6 +48,12 @@ def test_export_validator_checks_partition_graph_and_trace_schema(tmp_path):
     write_jsonl(tmp_path / "nested_layout_regions.jsonl", [])
     write_jsonl(tmp_path / "layout_relationships.jsonl", [])
     write_jsonl(tmp_path / "stage_trace.jsonl", [snapshot("final", physical)])
+    write_jsonl(
+        tmp_path / "page_diagnostics.jsonl", [{"page_number": 1, "status": "completed"}]
+    )
+    (tmp_path / "artifact_manifest.json").write_text(
+        json.dumps({"schema_version": 1, "files": []}), encoding="utf-8"
+    )
     assert validate_exported_artifacts(tmp_path)["valid"]
 
 
