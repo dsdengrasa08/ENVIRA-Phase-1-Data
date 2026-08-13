@@ -16,11 +16,17 @@ the documented `PHASE1_*` environment-variable overrides.
 ### Local/server
 
 ```bash
+# From this directory:
 python -m pip install -e ".[notebook]"
 export PHASE1_USE_GOOGLE_DRIVE=0
 export PHASE1_PROJECT_DIR=/persistent/envira/phase1_docling
 jupyter lab pdf_layout_pipeline_workflow.ipynb
 ```
+
+From the repository root, use
+`python -m pip install -e "./pdf_layout_pipeline-AEE-vWiP[notebook]"` instead.
+Legacy and Colab callers may continue using the path-independent
+`python -m pip install -r pdf_layout_pipeline-AEE-vWiP/requirements.txt` command.
 
 The installed application also provides a notebook-independent CLI:
 
