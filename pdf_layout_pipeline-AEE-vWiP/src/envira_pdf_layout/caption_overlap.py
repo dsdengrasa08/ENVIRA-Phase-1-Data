@@ -14,13 +14,8 @@ from typing import Any
 from .config import CaptionOverlapConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
+from .semantic_caption import parse_semantic_caption_reference
 
-_IDENTIFIER_RE = re.compile(
-    r"^\s*(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
-    r"(?:table|tab\.)\s+(?:[A-Z](?:[.\-]?\d+)?|[IVXLCDM]+|\d+(?:[.\-]\w+)?)"
-    r"(?:\s*[:.\-])?(?:\s+|$)",
-    re.IGNORECASE,
-)
 _CAPTION_TYPES = {"Caption"}
 _TEXT_LIKE_TYPES = {"Caption", "Text", "Footnote", "Section-header", "Title", "List"}
 _ASSET_TYPES = {"Table", "Figure"}
@@ -44,7 +39,8 @@ def _caption_like(region: LayoutRegion) -> bool:
 
 def _is_caption_candidate(region: LayoutRegion) -> bool:
     return region.get("type") in _CAPTION_TYPES or bool(
-        _IDENTIFIER_RE.match(_text(region))
+        (reference := parse_semantic_caption_reference(_text(region)))
+        and reference.kind == "table"
     )
 
 
@@ -424,6 +420,12 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
         ordered = sorted(
             member_ids,
             key=lambda rid: (
+                0
+                if (
+                    (reference := parse_semantic_caption_reference(_text(by_id[rid])))
+                    and reference.kind == "table"
+                )
+                else 1,
                 int(by_id[rid].get("layout_reading_order") or 10**9),
                 float(by_id[rid]["bbox_px"][1]),
                 float(by_id[rid]["bbox_px"][0]),
