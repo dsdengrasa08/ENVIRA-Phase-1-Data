@@ -166,14 +166,19 @@ source geometry, resolved geometry, suppressed detections, hierarchy arrows, and
 unresolved conflicts.
 
 Nested asset handling is non-destructive. Figure/table containment is proposed in
-the core, then validated once after duplicate resolution. Only semantically
-compatible children with one unambiguous container receive nested emission;
-expanded figures that newly capture text, nested containers, and competing parents
-remain top-level conflicts. Reading order is assigned after hierarchy acceptance as
+the core, then validated once after duplicate resolution and stabilized Figure
+decomposition. Directional child coverage is supplemented by a bounded, center-aware
+near-containment signal; this is deliberately not a blanket Figure margin. Only
+semantically compatible children of a trustworthy, unambiguous container receive
+nested emission. Text newly captured by Figure expansion, Figures exceeding the
+trusted page-area bound, nested containers, and competing parents remain top-level
+conflicts. Children already contained by the original pre-expansion Figure remain
+eligible for normal ownership. Reading order is assigned after hierarchy acceptance as
 separate contiguous top-level and parent-local sequences. Explicit exports are
 `physical_layout_regions.jsonl`, `top_level_layout_regions.jsonl`, and
 `nested_layout_regions.jsonl`; `final_regions` remains a compatibility name for the
-core-filtered physical input.
+core-filtered physical input. The `PipelineResult.document_regions` property and
+`regions_dataframe()` expose the consumer-facing top-level stream.
 
 General overlap resolution treats containment as observation only and emits
 `CONTAINMENT_CANDIDATE`; it never changes hierarchy emission. The hierarchy stage
@@ -201,8 +206,11 @@ normal hierarchy and caption association; ambiguous proposals preserve the origi
 Proposal records are exported to `figure_completion_proposals.jsonl` and displayed
 with a source/proposal/barrier overlay in the workflow notebook.
 
-Caption ownership is resolved by one non-destructive, class-aware association
-stage. Explicit `Figure`, `Table`, `Equation`, `Algorithm`, and `Listing`
+Caption ownership is resolved by a non-destructive, class-aware association
+policy. A provisional pass protects externally positioned, associated captions from
+spatial ownership before hierarchy; a final pass publishes authoritative edges.
+Caption-like identifiers deeply contained by a Figure are not protected and remain
+eligible to become Figure-internal children. Explicit `Figure`, `Table`, `Equation`, `Algorithm`, and `Listing`
 identifiers constrain eligible parent classes; detector-only captions use the same
 geometry, column, direction, blocker, and ambiguity checks. Every candidate emits
 an associated, unresolved, or unattached relationship, and no caption association

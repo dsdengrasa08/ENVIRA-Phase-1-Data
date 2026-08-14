@@ -29,6 +29,7 @@ from .table_context import associate_table_context
 from .region_index import RegionIndex
 from .reading_order import assign_document_reading_order
 from .schema import initialize_region_schema, normalize_relationship_schema
+from .geometry import bbox_area, intersection_area
 
 
 def run_layout_pipeline(conversion, page_set, config):
@@ -194,6 +195,20 @@ def run_layout_pipeline(conversion, page_set, config):
     else:
         result.completed_stages.append("figure_decomposition")
     region_index = RegionIndex.build(result.resolved_regions, result.pages)
+    # Caption semantics protect a genuine document-level caption before spatial
+    # hierarchy decides whether a detection belongs inside an asset.  The final
+    # association pass still runs after hierarchy to publish authoritative edges.
+    provisional_caption_associations = associate_captions(
+        result.resolved_regions,
+        result.pages,
+        config=config.caption_association,
+        index=region_index,
+    )
+    protected_caption_ids = _protected_caption_ids(
+        provisional_caption_associations,
+        result.resolved_regions,
+        config.containment.near_child_coverage,
+    )
     containment_metrics: dict[str, int] = {}
     hierarchy_run = execute_stage(
         name="nested_hierarchy",
@@ -203,6 +218,7 @@ def run_layout_pipeline(conversion, page_set, config):
             config,
             region_index,
             containment_metrics,
+            protected_caption_ids,
         ),
         fallback=lambda: (
             [],
@@ -454,15 +470,50 @@ def _package_version(package: str) -> str:
         return "unknown"
 
 
-def _run_hierarchy(regions, relationships, config, index, metrics):
+def _protected_caption_ids(associations, regions, near_child_coverage):
+    """Protect associated captions that are outside or only overlap an asset edge.
+
+    A caption-like identifier deep inside a Figure is intentionally not protected:
+    it remains eligible for Figure-internal ownership.
+    """
+    by_id = {str(region["layout_region_id"]): region for region in regions}
+    protected = set()
+    for relation in associations:
+        if relation.get("status") != "associated" or not relation.get(
+            "parent_region_id"
+        ):
+            continue
+        child = by_id.get(str(relation.get("child_region_id")))
+        parent = by_id.get(str(relation.get("parent_region_id")))
+        if not child or not parent:
+            continue
+        cb = tuple(map(float, child["bbox_px"]))
+        pb = tuple(map(float, parent["bbox_px"]))
+        coverage = intersection_area(cb, pb) / max(bbox_area(cb), 1.0)
+        center = ((cb[0] + cb[2]) / 2, (cb[1] + cb[3]) / 2)
+        center_inside = pb[0] <= center[0] <= pb[2] and pb[1] <= center[1] <= pb[3]
+        if coverage < near_child_coverage or not center_inside:
+            protected.add(str(child["layout_region_id"]))
+    return protected
+
+
+def _run_hierarchy(
+    regions, relationships, config, index, metrics, protected_child_ids=None
+):
     proposals = analyze_nested_containment(
         regions,
         relationships,
         config=config.containment,
         index=index,
         metrics=metrics,
+        protected_child_ids=protected_child_ids,
     )
-    return proposals, resolve_nested_hierarchy(regions, proposals, config.containment)
+    return proposals, resolve_nested_hierarchy(
+        regions,
+        proposals,
+        config.containment,
+        protected_child_ids=protected_child_ids,
+    )
 
 
 def _issue_from_dict(value):
