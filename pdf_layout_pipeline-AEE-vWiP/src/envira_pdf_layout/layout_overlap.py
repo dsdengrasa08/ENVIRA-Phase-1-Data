@@ -232,17 +232,7 @@ def _classify(
         or center_containment
         or tolerant_near_containment
     ):
-        reason = (
-            "figure_edge_internal_text_observed"
-            if figure_edge_internal
-            and not (
-                f["intersection_over_smaller"] >= containment.strong_child_coverage
-                or center_containment
-                or tolerant_near_containment
-            )
-            else "directional_containment_observed"
-        )
-        return "CONTAINMENT_CANDIDATE", reason, "observe"
+        return "CONTAINMENT_CANDIDATE", "directional_containment_observed", "observe"
     if f["intersection_area"] > 0:
         families = {f["left_family"], f["right_family"]}
         smaller_h = min(

@@ -335,12 +335,326 @@ def test_fragmented_table_identifier_is_reconstructed_from_adjacent_boxes():
     regions = [
         region("word", "Text", [100, 100, 180, 125], "Table", 1),
         region("number", "Text", [185, 100, 220, 125], "4.", 2),
-        region("description", "Text", [225, 100, 700, 125], "Experimental results", 3),
+        region(
+            "description", "Caption", [225, 100, 700, 125], "Experimental results", 3
+        ),
         region("table", "Table", [100, 130, 700, 500], order=4),
     ]
     group = associate(regions)[0]
-    assert group["identifier_region_ids"] == ["word", "number", "description"]
-    assert all(region["type"] == "Text" for region in regions[:3])
+    assert group["identifier_region_ids"] == ["word", "number"]
+    assert group["caption_region_ids"] == ["description"]
+    assert [region["type"] for region in regions[:3]] == ["Text", "Text", "Caption"]
+
+
+def test_rotated_fragmented_identifier_uses_caption_local_order_not_page_order():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        # Deliberately incorrect global reading order: local orientation must win.
+        region("number", "Text", [100, 175, 140, 195], "5.", 1, orientation=90),
+        region("word", "Text", [100, 100, 140, 170], "Table", 3, orientation=90),
+        region(
+            "description",
+            "Caption",
+            [100, 200, 140, 750],
+            "Seasonal emissions by treatment.",
+            2,
+            orientation=90,
+        ),
+        region("table", "Table", [150, 100, 700, 800], order=4),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["identifier_region_ids"] == ["number", "word"]
+    assert group["caption_region_ids"] == ["description"]
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["word", "number", "description"]
+    assert caption["text"] == "Table 5. Seasonal emissions by treatment."
+
+
+def test_rotated_270_fragmented_identifier_preserves_reading_direction():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region("word", "Text", [100, 730, 140, 800], "Table", 1, orientation=270),
+        region("number", "Text", [100, 705, 140, 725], "12", 2, orientation=270),
+        region(
+            "description",
+            "Caption",
+            [100, 150, 140, 700],
+            "Outcomes by treatment.",
+            3,
+            orientation=270,
+        ),
+        region("table", "Table", [150, 100, 700, 800], order=4),
+    ]
+
+    logical = associate(regions)
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["word", "number", "description"]
+    assert caption["text"] == "Table 12 Outcomes by treatment."
+
+
+def test_rotated_fragmented_identifier_beats_opposite_table_note_caption():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region("word", "Text", [150, 100, 190, 170], "Table", 1, orientation=90),
+        region("number", "Text", [150, 175, 190, 195], "5", 2, orientation=90),
+        region(
+            "description",
+            "Caption",
+            [150, 200, 190, 700],
+            "N2O emissions by treatment.",
+            3,
+            orientation=90,
+        ),
+        region("table", "Table", [200, 100, 700, 800], order=4),
+        region(
+            "false-anchor-note",
+            "Caption",
+            [710, 100, 750, 800],
+            "Table a See Table 2 for treatment codes.",
+            5,
+            orientation=90,
+        ),
+        region(
+            "note",
+            "Caption",
+            [755, 100, 795, 800],
+            "Values in parentheses represent standard errors.",
+            6,
+            orientation=90,
+        ),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert set(group["identifier_region_ids"]) == {"word", "number"}
+    assert group["caption_region_ids"] == ["description"]
+    assert "false-anchor-note" not in group["caption_region_ids"]
+    assert "note" not in group["caption_region_ids"]
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["text"] == "Table 5 N2O emissions by treatment."
+    assert caption["bbox_spans_table"] is False
+
+
+def test_compact_number_bbox_cannot_veto_rotated_fragment_reconstruction():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        # The word's bbox suggests a vertical axis, while the compact rotated
+        # number happens to be wider than tall and suggests a horizontal axis.
+        region("word", "Text", [150, 100, 170, 170], "Table", 1),
+        region("number", "Text", [150, 175, 200, 190], "4", 2),
+        region(
+            "description",
+            "Caption",
+            [150, 200, 190, 700],
+            "N2O emissions by treatment.",
+            3,
+            orientation=90,
+        ),
+        region("table", "Table", [205, 100, 700, 800], order=4),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert set(group["identifier_region_ids"]) == {"word", "number"}
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["text"] == "Table 4 N2O emissions by treatment."
+
+
+def test_number_overlapping_bare_label_caption_is_absorbed_semantically():
+    from types import SimpleNamespace
+
+    from envira_pdf_layout.caption_overlap import (
+        annotate_caption_members,
+        build_caption_groups,
+    )
+    from envira_pdf_layout.visualization import _semantic_display_regions
+
+    regions = [
+        region("number", "Text", [150, 670, 200, 690], "4", 1),
+        region(
+            "caption",
+            "Caption",
+            [150, 100, 190, 700],
+            "Table Average N2O flux by treatment.",
+            2,
+            orientation=90,
+        ),
+        region("table", "Table", [205, 100, 700, 800], order=3),
+    ]
+    for item in regions:
+        item["resolved_reading_order"] = item["layout_reading_order"]
+        item["emission_policy"] = "emit_canonical"
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["identifier_region_ids"] == ["number"]
+    assert group["caption_region_ids"] == ["caption"]
+    captions = build_caption_groups(regions, logical, [], PAGES)
+    annotate_caption_members(regions, captions)
+    displayed = _semantic_display_regions(
+        SimpleNamespace(resolved_regions=regions, caption_groups=captions),
+        {"page_number": 1},
+    )
+
+    assert captions[0]["text"] == "Table 4 Average N2O flux by treatment."
+    assert [item["type"] for item in displayed] == ["Caption", "Table"]
+    assert all(item["layout_region_id"] != "number" for item in displayed)
+
+
+def test_fragmented_identifier_variants_join_a_detector_caption():
+    variants = [
+        (["TABLE", "IV"], "TABLE IV"),
+        (["Table", "S3"], "Table S3"),
+        (["Tab.", "4"], "Tab. 4"),
+        (["Supplementary", "Table", "S", "3"], "Supplementary Table S 3"),
+    ]
+    for case, (fragments, expected) in enumerate(variants):
+        regions = [
+            region(
+                f"fragment-{case}-{index}",
+                "Text",
+                [100 + index * 65, 100, 160 + index * 65, 125],
+                text,
+                index + 1,
+                orientation=0,
+            )
+            for index, text in enumerate(fragments)
+        ]
+        regions.extend(
+            [
+                region(
+                    f"caption-{case}",
+                    "Caption",
+                    [100 + len(fragments) * 65, 100, 800, 125],
+                    "Measured outcomes.",
+                    len(fragments) + 1,
+                    orientation=0,
+                ),
+                region(f"table-{case}", "Table", [100, 130, 800, 500], order=9),
+            ]
+        )
+        group = associate(regions)[0]
+        assert len(group["identifier_region_ids"]) == len(fragments), expected
+        assert group["caption_region_ids"] == [f"caption-{case}"], expected
+
+
+def test_fragmented_body_reference_without_caption_is_not_reconstructed():
+    regions = [
+        region(
+            "prose",
+            "Text",
+            [100, 100, 500, 125],
+            "The results are shown in Table",
+            1,
+        ),
+        region("number", "Text", [505, 100, 530, 125], "5.", 2),
+        region("table", "Table", [100, 200, 700, 500], order=3),
+    ]
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == []
+    assert group["caption_region_ids"] == []
+
+
+def test_fragmented_identifier_never_uses_table_cell_text():
+    regions = [
+        region("word", "Text", [100, 100, 180, 125], "Table", 1),
+        region("cell-number", "Text", [185, 150, 220, 175], "5", 2),
+        region("caption", "Caption", [225, 100, 700, 125], "Measured outcomes.", 3),
+        region("table", "Table", [100, 130, 700, 500], order=4),
+    ]
+    group = associate(regions)[0]
+    assert "cell-number" not in group["identifier_region_ids"]
+
+
+def test_fragmented_identifier_does_not_absorb_table_note_or_margin_text():
+    regions = [
+        region("word", "Text", [100, 100, 180, 125], "Table", 1),
+        region("number", "Text", [185, 100, 220, 125], "7", 2),
+        region("margin", "Text", [20, 100, 60, 500], "Journal", 3, orientation=90),
+        region("caption", "Caption", [225, 100, 700, 125], "Measured outcomes.", 4),
+        region("table", "Table", [100, 130, 700, 500], order=5),
+        region("note", "Text", [100, 505, 700, 530], "Note: n = 7", 6),
+    ]
+    group = associate(regions)[0]
+    assert set(group["identifier_region_ids"]) == {"word", "number"}
+    assert "margin" not in group["caption_region_ids"]
+    assert "note" not in group["caption_region_ids"]
+
+
+def test_complete_text_identifier_and_unfragmented_caption_are_unchanged():
+    regions = [
+        region("identifier", "Text", [100, 100, 220, 125], "Table 5.", 1),
+        region("caption", "Caption", [225, 100, 700, 125], "Measured outcomes.", 2),
+        region("table", "Table", [100, 130, 700, 500], order=3),
+    ]
+    group = associate(regions)[0]
+    assert group["identifier_region_ids"] == ["identifier"]
+    assert group["caption_region_ids"] == ["caption"]
+    assert [item["type"] for item in regions] == ["Text", "Caption", "Table"]
+
+
+def test_fragmented_caption_members_render_as_one_semantic_caption():
+    from types import SimpleNamespace
+
+    from envira_pdf_layout.caption_overlap import (
+        annotate_caption_members,
+        build_caption_groups,
+    )
+    from envira_pdf_layout.visualization import _semantic_display_regions
+
+    regions = [
+        region("word", "Text", [100, 100, 180, 125], "Table", 1),
+        region("number", "Text", [185, 100, 220, 125], "5.", 2),
+        region("caption", "Caption", [225, 100, 700, 125], "Measured outcomes.", 3),
+        region("table", "Table", [100, 130, 700, 500], order=4),
+    ]
+    for item in regions:
+        item["resolved_reading_order"] = item["layout_reading_order"]
+        item["emission_policy"] = "emit_canonical"
+    logical = associate(regions)
+    captions = build_caption_groups(regions, logical, [], PAGES)
+    annotate_caption_members(regions, captions)
+    displayed = _semantic_display_regions(
+        SimpleNamespace(resolved_regions=regions, caption_groups=captions),
+        {"page_number": 1},
+    )
+
+    assert [item["type"] for item in displayed] == ["Caption", "Table"]
+    assert displayed[0]["text"] == "Table 5. Measured outcomes."
+    assert [item["type"] for item in regions] == [
+        "Text",
+        "Text",
+        "Caption",
+        "Table",
+    ]
+
+
+def test_fragmented_identifier_can_lead_a_multiline_caption():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region("word", "Text", [100, 100, 180, 125], "Table", 1, orientation=0),
+        region("number", "Text", [185, 100, 220, 125], "5.", 2, orientation=0),
+        region(
+            "caption",
+            "Caption",
+            [100, 130, 700, 165],
+            "Measured outcomes on the following line.",
+            3,
+            orientation=0,
+        ),
+        region("table", "Table", [100, 170, 700, 500], order=4),
+    ]
+    logical = associate(regions)
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["ordered_source_region_ids"] == ["word", "number", "caption"]
+    assert caption["text"] == "Table 5. Measured outcomes on the following line."
 
 
 def test_rotated_table_accepts_caption_on_table_local_side():
@@ -574,11 +888,19 @@ def test_explicit_270_degree_orientation_orders_identifier_before_caption():
 def test_incompatible_orientation_does_not_join_caption():
     regions = [
         region(
-            "caption", "Caption", [30, 100, 75, 755], "Seasonal emissions.", 1,
+            "caption",
+            "Caption",
+            [30, 100, 75, 755],
+            "Seasonal emissions.",
+            1,
             orientation=90,
         ),
         region(
-            "identifier", "Text", [30, 760, 75, 800], "Table 4.", 2,
+            "identifier",
+            "Text",
+            [30, 760, 75, 800],
+            "Table 4.",
+            2,
             orientation=0,
         ),
         region("table", "Table", [80, 100, 600, 800], order=3),
@@ -619,12 +941,20 @@ def test_rotated_caption_graph_grows_plain_text_in_normalized_space():
 def test_rotated_table_cell_identifier_is_not_caption_content():
     regions = [
         region(
-            "caption", "Caption", [30, 100, 75, 500], "Seasonal emissions.", 1,
+            "caption",
+            "Caption",
+            [30, 100, 75, 500],
+            "Seasonal emissions.",
+            1,
             orientation=90,
         ),
         region("table", "Table", [80, 100, 600, 800], order=2),
         region(
-            "cell", "Text", [200, 200, 240, 500], "Table 4", 3,
+            "cell",
+            "Text",
+            [200, 200, 240, 500],
+            "Table 4",
+            3,
             orientation=90,
         ),
     ]
