@@ -77,6 +77,41 @@ def test_expanded_figure_capturing_text_remains_top_level_and_ambiguous():
     assert result.decisions[0]["reason"] == "expanded_asset_captures_text"
 
 
+def test_text_already_in_original_figure_can_remain_an_internal_child():
+    result = resolve_nested_hierarchy(
+        [
+            region(
+                "figure",
+                "Figure",
+                [0, 0, 500, 500],
+                figure_completion_original_bbox_px=[0, 0, 200, 200],
+            ),
+            region("label", "Text", [20, 20, 80, 40], text="axis"),
+        ]
+    )
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["label"]
+
+
+def test_page_spanning_figure_is_not_trusted_to_own_contained_text():
+    regions = [
+        region("figure", "Figure", [0, 0, 900, 900]),
+        region("label", "Text", [20, 20, 80, 40], text="axis"),
+    ]
+    observations = resolve_layout_overlaps(
+        regions,
+        [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}],
+        containment=ContainmentConfig(),
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+    assert result.nested_regions == []
+    assert result.decisions[0]["reason"] == "figure_exceeds_trusted_page_area"
+
+
 def test_nested_container_and_multiple_parents_are_not_forced_into_hierarchy():
     regions = [
         region("figure", "Figure", [0, 0, 500, 500]),
@@ -271,3 +306,37 @@ def test_observational_candidate_flows_to_one_authoritative_policy_outcome():
     )
     assert len(resolved.relationships) == 1
     assert resolved.relationships[0]["kind"] == "NESTED_CHILD"
+
+
+def test_figure_internal_semantic_hint_overrides_length_only_paragraph_guess():
+    result = outcome(
+        "Figure", "Text", "long legend entry " * 12, semantic_role="legend"
+    )
+    assert result.decisions[0]["kind"] == "NESTED_CHILD"
+    assert result.decisions[0]["inferred_child_role"] == "figure_internal_text"
+
+
+def test_plot_title_and_legend_list_are_supported_figure_children():
+    assert outcome(
+        "Figure", "Title", "Observed and modelled", semantic_role="plot_title"
+    ).decisions[0]["kind"] == "NESTED_CHILD"
+    assert outcome(
+        "Figure", "List", "N0\nN1\nN2", semantic_role="legend"
+    ).decisions[0]["kind"] == "NESTED_CHILD"
+    assert outcome("Figure", "Title", "Methods").decisions[0]["kind"] == (
+        "INVALID_OCCLUSION"
+    )
+
+
+def test_caption_protection_keeps_external_semantic_sibling_top_level():
+    parent = region("figure", "Figure", [0, 0, 500, 500])
+    caption = region("caption", "Caption", [20, 470, 480, 530], text="Figure 1. Test")
+    proposals = analyze_nested_containment([parent, caption])
+    result = resolve_nested_hierarchy(
+        [parent, caption], proposals, protected_child_ids={"caption"}
+    )
+    assert result.nested_regions == []
+    assert {row["layout_region_id"] for row in result.top_level_regions} == {
+        "figure",
+        "caption",
+    }
