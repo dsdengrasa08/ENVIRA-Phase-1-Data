@@ -53,6 +53,37 @@ def test_side_by_side_oversized_edge_is_refined_at_visual_valley(tmp_path):
     assert by_id["a"]["geometry_history"][-1]["stage"] == "figure_boundary_refinement"
 
 
+def test_touching_side_by_side_boxes_are_treated_as_connected_conflict(tmp_path):
+    """Regression for boxes like the supplied page: x1(A) == x0(B), so IoU is zero."""
+    regions = [
+        region("left", "Figure", [51, 47, 488, 345]),
+        region("right", "Figure", [488, 47, 809, 760]),
+    ]
+    pages = page(
+        tmp_path,
+        [(72, 64, 401, 284), (515, 65, 799, 740)],
+        size=(860, 800),
+    )
+    result = refine_figure_boundaries(regions, pages, FigureFilterConfig())
+    by_id = {r["layout_region_id"]: r for r in result.regions}
+    assert result.proposals[0]["intersection_area"] == 0
+    assert result.proposals[0]["connected_neighbor"] is True
+    assert result.proposals[0]["decision"] == "accepted"
+    assert by_id["left"]["bbox_px"][2] < 488
+    assert by_id["right"]["bbox_px"][0] >= 488
+
+
+def test_small_rounding_gap_can_trigger_analysis_but_large_clean_gap_does_not(tmp_path):
+    regions = [
+        region("left", "Figure", [50, 100, 499, 400]),
+        region("right", "Figure", [500, 100, 900, 400]),
+    ]
+    pages = page(tmp_path, [(70, 120, 400, 380), (540, 120, 880, 380)])
+    result = refine_figure_boundaries(regions, pages, config())
+    assert result.proposals[0]["connected_neighbor"] is True
+    assert result.changed is True
+
+
 def test_vertically_stacked_oversized_edge_is_refined(tmp_path):
     regions = [
         region("a", "Figure", [100, 40, 700, 430]),

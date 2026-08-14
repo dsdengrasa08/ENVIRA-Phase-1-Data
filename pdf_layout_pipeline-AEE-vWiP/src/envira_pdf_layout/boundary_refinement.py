@@ -213,6 +213,25 @@ def _ink_ratio(image: np.ndarray, box: list[float], threshold: int) -> float:
     return float(np.mean(crop < threshold)) if crop.size else 0.0
 
 
+def _axis_relationship(
+    a: list[float], b: list[float], axis: str, page_extent: float
+) -> tuple[float, float]:
+    """Return the separating-axis gap and smaller-span cross-axis overlap.
+
+    A zero gap is important: diagnostic boxes that merely touch have no intersection
+    area, but still form one connected semantic region in the final overlay.
+    """
+    if axis == "x":
+        gap = max(0.0, max(a[0], b[0]) - min(a[2], b[2]))
+        overlap = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+        smaller_cross_span = min(a[3] - a[1], b[3] - b[1])
+    else:
+        gap = max(0.0, max(a[1], b[1]) - min(a[3], b[3]))
+        overlap = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+        smaller_cross_span = min(a[2] - a[0], b[2] - b[0])
+    return gap / max(page_extent, 1.0), overlap / max(smaller_cross_span, 1.0)
+
+
 def _protected_intersections(
     candidate_removed: list[float], regions, own_ids: set[str], padding: float
 ) -> list[str]:
@@ -299,23 +318,30 @@ def refine_figure_boundaries(
                     list(map(float, left["bbox_px"])),
                     list(map(float, right["bbox_px"])),
                 )
-                intersection = intersection_area(tuple(ab), tuple(bb))
-                if intersection <= 0:
-                    continue
-                smaller_ratio = intersection / max(
-                    1.0, min(bbox_area(tuple(ab)), bbox_area(tuple(bb)))
-                )
                 dx = abs((ab[0] + ab[2]) - (bb[0] + bb[2])) / max(page_w, 1.0)
                 dy = abs((ab[1] + ab[3]) - (bb[1] + bb[3])) / max(page_h, 1.0)
                 axis = "x" if dx >= dy else "y"
+                intersection = intersection_area(tuple(ab), tuple(bb))
+                smaller_ratio = intersection / max(
+                    1.0, min(bbox_area(tuple(ab)), bbox_area(tuple(bb)))
+                )
                 penetration = (
                     (min(ab[2], bb[2]) - max(ab[0], bb[0]))
                     if axis == "x"
                     else (min(ab[3], bb[3]) - max(ab[1], bb[1]))
                 )
                 extent = page_w if axis == "x" else page_h
+                gap_ratio, cross_axis_overlap = _axis_relationship(ab, bb, axis, extent)
+                connected_neighbor = bool(
+                    gap_ratio <= config.refinement_max_neighbor_gap_page_ratio
+                    and cross_axis_overlap
+                    >= config.refinement_min_cross_axis_overlap_ratio
+                )
+                if intersection <= 0 and not connected_neighbor:
+                    continue
                 if (
-                    smaller_ratio < config.refinement_min_conflict_smaller_ratio
+                    not connected_neighbor
+                    and smaller_ratio < config.refinement_min_conflict_smaller_ratio
                     and penetration / max(extent, 1.0)
                     < config.refinement_min_penetration_page_ratio
                 ):
@@ -347,6 +373,9 @@ def refine_figure_boundaries(
                     "axis": axis,
                     "intersection_area": intersection,
                     "intersection_over_smaller": smaller_ratio,
+                    "neighbor_gap_page_ratio": gap_ratio,
+                    "cross_axis_overlap_ratio": cross_axis_overlap,
+                    "connected_neighbor": connected_neighbor,
                 }
                 if not first_core or not second_core:
                     proposals.append(

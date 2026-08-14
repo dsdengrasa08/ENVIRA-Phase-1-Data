@@ -52,9 +52,11 @@ figures:
   # Boundary refinement is conflict-driven and shrink-only.
   refine_boundaries: true
   refinement_ink_threshold: 246
-  refinement_min_component_area_ratio: 0.001
+  refinement_min_component_area_ratio: 0.00005
   refinement_min_conflict_smaller_ratio: 0.08
   refinement_min_penetration_page_ratio: 0.004
+  refinement_max_neighbor_gap_page_ratio: 0.002
+  refinement_min_cross_axis_overlap_ratio: 0.25
   refinement_max_valley_density: 0.015
   refinement_min_valley_page_ratio: 0.003
   refinement_max_removed_ink_ratio: 0.015
