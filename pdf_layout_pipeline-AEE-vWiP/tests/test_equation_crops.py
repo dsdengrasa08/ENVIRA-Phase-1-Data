@@ -49,7 +49,7 @@ def test_isolated_equation_gets_scale_aware_visual_margin_only():
     equation = result.regions[0]
     assert equation["bbox_px"] == source["bbox_px"]
     assert equation["resolved_bbox_px"] == source["resolved_bbox_px"]
-    assert equation["visual_crop_bbox_px"] == [288.0, 291.0, 612.0, 359.0]
+    assert equation["visual_crop_bbox_px"] == [282.5, 285.0, 617.5, 365.0]
     assert result.changed is True
 
 
@@ -72,7 +72,7 @@ def test_equation_immediately_followed_by_text_keeps_other_margins():
         region("below", "Text", [250, 351, 650, 410], "below"),
     ]
     crop = refined(regions).regions[0]["visual_crop_bbox_px"]
-    assert crop[:3] == [288.0, 291.0, 612.0]
+    assert crop[:3] == [282.5, 285.0, 617.5]
     assert crop[3] == 350.0
 
 

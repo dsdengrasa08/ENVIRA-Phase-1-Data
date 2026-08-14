@@ -289,9 +289,9 @@ class EquationCropConfig:
 
     enabled: bool = True
     horizontal_margin_height_ratio: float = 0.35
-    vertical_margin_height_ratio: float = 0.18
+    vertical_margin_height_ratio: float = 0.30
     minimum_clearance_height_ratio: float = 0.12
-    maximum_margin_page_ratio: float = 0.012
+    maximum_margin_page_ratio: float = 0.018
     neighbor_corridor_overlap_ratio: float = 0.20
     equation_number_max_gap_page_ratio: float = 0.20
     ink_threshold: int = 235

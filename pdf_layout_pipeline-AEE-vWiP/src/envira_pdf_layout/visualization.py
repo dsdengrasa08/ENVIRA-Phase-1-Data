@@ -40,6 +40,13 @@ def _label(image, text, origin, color):
     )
 
 
+def _display_bbox(region):
+    """Use the safe reading crop when displaying Formula/Equation regions."""
+    if region.get("type") in {"Formula", "Equation"}:
+        return region.get("visual_crop_bbox_px") or region["bbox_px"]
+    return region["bbox_px"]
+
+
 def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
     import cv2
 
@@ -47,7 +54,7 @@ def render_layout_overlay(page, output_path: Path | None = None) -> Overlay:
     if image is None:
         raise FileNotFoundError(page["page_image_path"])
     for r in page.get("asset_aware_overlay_regions", page["layout_regions"]):
-        x0, y0, x1, y1 = int_bbox(tuple(r["bbox_px"]))
+        x0, y0, x1, y1 = int_bbox(tuple(_display_bbox(r)))
         typ = r.get("type", "Unknown")
         color = _COLORS.get(typ, _COLORS["Unknown"])
         cv2.rectangle(image, (x0, y0), (x1, y1), color, 3)

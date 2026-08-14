@@ -152,6 +152,9 @@ remain unchanged; downstream Equation image extraction should use
 `equation_crops.equation_crop_bbox(region)`. Decisions and blockers are published
 under the `equation_visual_crop_refinement` diagnostic, and
 `render_equation_crop_overlay` compares physical and crop extents.
+The standard semantic and resolved overlays also draw Formula/Equation regions
+with this visual crop, so the displayed yellow Equation box matches the extent
+that downstream Equation image extraction receives.
 
 ## Generalized overlap resolution
 
