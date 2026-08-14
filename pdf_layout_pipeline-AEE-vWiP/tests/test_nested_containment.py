@@ -59,7 +59,7 @@ def test_compatible_asset_child_is_nested_and_ordered_after_hierarchy():
     assert by_id["body"]["resolved_reading_order"] == 2
 
 
-def test_expanded_figure_capturing_text_remains_top_level_and_ambiguous():
+def test_expanded_figure_owns_centered_text_as_internal_content():
     result = resolve_nested_hierarchy(
         [
             region(
@@ -71,10 +71,86 @@ def test_expanded_figure_capturing_text_remains_top_level_and_ambiguous():
             region("body", "Text", [300, 300, 450, 350], text="valid body"),
         ]
     )
-    assert result.nested_regions == []
-    assert len(result.top_level_regions) == 2
-    assert result.decisions[0]["kind"] == "AMBIGUOUS_CONTAINMENT"
-    assert result.decisions[0]["reason"] == "expanded_asset_captures_text"
+    assert [row["layout_region_id"] for row in result.top_level_regions] == ["figure"]
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["body"]
+    assert result.decisions[0]["kind"] == "NESTED_CHILD"
+    assert result.decisions[0]["reason"] == "figure_owns_centered_text"
+
+
+def test_text_already_in_original_figure_can_remain_an_internal_child():
+    result = resolve_nested_hierarchy(
+        [
+            region(
+                "figure",
+                "Figure",
+                [0, 0, 500, 500],
+                figure_completion_original_bbox_px=[0, 0, 200, 200],
+            ),
+            region("label", "Text", [20, 20, 80, 40], text="axis"),
+        ]
+    )
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["label"]
+
+
+def test_page_spanning_figure_still_owns_centered_generic_text():
+    regions = [
+        region("figure", "Figure", [0, 0, 900, 900]),
+        region("label", "Text", [20, 20, 80, 40], text="axis"),
+    ]
+    observations = resolve_layout_overlaps(
+        regions,
+        [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}],
+        containment=ContainmentConfig(),
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["label"]
+    assert result.decisions[0]["reason"] == "figure_owns_centered_text"
+
+
+def test_rotated_edge_label_flows_from_overlap_into_nested_figure_emission():
+    regions = [
+        region("axis", "Text", [105, 50, 120, 275], text="Seasonal emission"),
+        region("figure", "Figure", [100, 120, 850, 530]),
+    ]
+    pages = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
+    observations = resolve_layout_overlaps(
+        regions, pages, containment=ContainmentConfig()
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+
+    assert [row["layout_region_id"] for row in result.top_level_regions] == ["figure"]
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["axis"]
+    assert result.nested_regions[0]["emission_policy"] == "emit_as_nested_child"
+
+
+def test_near_identical_text_envelope_is_nested_under_figure_not_score_competed():
+    regions = [
+        region("figure", "Figure", [100, 100, 800, 700], score=0.70),
+        region("text", "Text", [101, 101, 799, 699], text="OCR", score=0.99),
+    ]
+    pages = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
+    observations = resolve_layout_overlaps(
+        regions, pages, containment=ContainmentConfig()
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+
+    assert [row["layout_region_id"] for row in result.top_level_regions] == ["figure"]
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["text"]
 
 
 def test_text_already_in_original_figure_can_remain_an_internal_child():
@@ -263,8 +339,8 @@ def test_incompatible_and_ambiguous_asset_children_remain_top_level():
     )
     assert full_caption.decisions[0]["kind"] == "AMBIGUOUS_CONTAINMENT"
     paragraph = outcome("Figure", "Text", "x" * 100)
-    assert paragraph.decisions[0]["kind"] == "INVALID_OCCLUSION"
-    assert paragraph.nested_regions == []
+    assert paragraph.decisions[0]["kind"] == "NESTED_CHILD"
+    assert [row["layout_region_id"] for row in paragraph.nested_regions] == ["child"]
 
 
 def test_table_note_requires_strong_not_only_center_containment():

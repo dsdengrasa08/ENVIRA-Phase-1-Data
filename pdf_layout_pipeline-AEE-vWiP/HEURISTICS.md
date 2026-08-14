@@ -53,7 +53,7 @@ legend, or annotation text as Figure-internal content rather than relying on tex
 alone. One shared `containment` configuration section supplies strong and bounded-near
 geometry, Figure trust, and role thresholds. Associated external captions are protected
 as document-level siblings before containment is resolved.
-Small elongated Text/Footnote boxes may also be admitted when they cross exactly one
-Figure edge, retain their center inside the Figure, have high orthogonal-axis coverage,
-and occupy only a small fraction of the parent. This targets rotated axis labels without
-lowering the general containment threshold for neighboring prose.
+Generic Text, Footnote, and Unknown regions with a positive Figure intersection and
+their center inside that Figure follow a direct semantic-ownership rule. This ensures
+embedded OCR fragments do not survive as independent document blocks; detector score
+and OCR length do not override Figure ownership. Caption association remains exempt.

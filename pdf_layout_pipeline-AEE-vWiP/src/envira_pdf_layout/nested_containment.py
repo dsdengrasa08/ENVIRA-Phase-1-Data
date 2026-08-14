@@ -309,6 +309,22 @@ def _classify(
     parent_type, child_type = proposal["parent_type"], proposal["child_type"]
     features = proposal["features"]
     role, role_evidence = infer_child_role(child, parent, config)
+    if (
+        parent_type == "Figure"
+        and child_type in {"Text", "Footnote", "Unknown"}
+        and features["child_center_inside_parent"]
+        and features["child_coverage"] > 0
+    ):
+        # Figure ownership is a document-emission decision, not a detector-score
+        # competition. Even long OCR fragments, large duplicate text envelopes, or
+        # labels captured by a completed Figure are nested when their center belongs
+        # to the Figure. Captions remain protected by semantic caption association.
+        return (
+            "NESTED_CHILD",
+            "figure_owns_centered_text",
+            role,
+            role_evidence + ["semantic_ownership:figure_center"],
+        )
     child_parent_ratio = features["child_area"] / max(features["parent_area"], 1.0)
     if child_parent_ratio > config.max_child_parent_area_ratio:
         return (

@@ -115,8 +115,6 @@ def overlap_features(
         "area_ratio": min(area_a, area_b) / max(area_a, area_b)
         if max(area_a, area_b)
         else 0.0,
-        "a_aspect_ratio": max(aw, ah) / max(1.0, min(aw, ah)),
-        "b_aspect_ratio": max(bw, bh) / max(1.0, min(bw, bh)),
         "a_page_area_ratio": area_a / (width * height) if width * height else 0.0,
         "b_page_area_ratio": area_b / (width * height) if width * height else 0.0,
         "a_center_inside_b": bb[0] <= ac[0] <= bb[2] and bb[1] <= ac[1] <= bb[3],
@@ -140,17 +138,11 @@ def overlap_features(
             max(0.0, bb[1] - ab[1]) / height,
             max(0.0, ab[3] - bb[3]) / height,
         ),
-        "a_outside_edge_count": sum(
-            (ab[0] < bb[0], ab[2] > bb[2], ab[1] < bb[1], ab[3] > bb[3])
-        ),
         "b_protrusion_page_ratio": max(
             max(0.0, ab[0] - bb[0]) / width,
             max(0.0, bb[2] - ab[2]) / width,
             max(0.0, ab[1] - bb[1]) / height,
             max(0.0, bb[3] - ab[3]) / height,
-        ),
-        "b_outside_edge_count": sum(
-            (bb[0] < ab[0], bb[2] > ab[2], bb[1] < ab[1], bb[3] > ab[3])
         ),
         "horizontal_gap_page_ratio": max(0.0, max(ab[0], bb[0]) - min(ab[2], bb[2]))
         / width,
@@ -198,6 +190,12 @@ def _classify(
     config: OverlapResolutionConfig,
     containment: ContainmentConfig,
 ) -> tuple[str, str, str]:
+    if _figure_center_owned_text(a, b, f):
+        return (
+            "CONTAINMENT_CANDIDATE",
+            "figure_center_owned_text_observed",
+            "observe",
+        )
     duplicate_geometry = (
         f["iou"] >= config.duplicate_iou
         and f["area_ratio"] >= config.duplicate_area_ratio
@@ -229,12 +227,10 @@ def _classify(
         and f["b_protrusion_page_ratio"]
         <= containment.near_max_edge_protrusion_page_ratio
     )
-    figure_edge_internal = _figure_edge_internal_candidate(a, b, f, containment)
     if (
         f["intersection_over_smaller"] >= containment.strong_child_coverage
         or center_containment
         or tolerant_near_containment
-        or figure_edge_internal
     ):
         reason = (
             "figure_edge_internal_text_observed"
@@ -273,45 +269,27 @@ def _classify(
     return "INDEPENDENT", "no_material_relationship", "retain"
 
 
-def _figure_edge_internal_candidate(
-    a: LayoutRegion,
-    b: LayoutRegion,
-    features: dict[str, Any],
-    config: ContainmentConfig,
+def _figure_center_owned_text(
+    a: LayoutRegion, b: LayoutRegion, features: dict[str, Any]
 ) -> bool:
-    """Recognize a small elongated label crossing one imperfect Figure edge.
+    """Treat generic Text centered in a Figure as Figure-owned content.
 
-    The detector commonly emits rotated axis labels as tall, narrow Text boxes while
-    the Figure proposal begins at the plot frame.  A generic lower containment
-    threshold would endanger adjacent prose, so this path requires Figure/Text
-    semantics and several independent shape constraints.
+    This is intentionally semantic rather than score-based: axis labels, legends,
+    annotations, and OCR fragments remain part of the Figure even when an imperfect
+    Figure edge yields low child coverage. Captions are excluded and handled by the
+    caption-association safeguard.
     """
-    for child, parent, prefix in ((a, b, "a"), (b, a, "b")):
-        if parent.get("type") != "Figure" or child.get("type") not in {
-            "Text",
-            "Footnote",
-            "Unknown",
-        }:
-            continue
-        bbox = list(map(float, child["bbox_px"]))
-        vertical = bbox[3] - bbox[1] >= bbox[2] - bbox[0]
-        orthogonal_coverage = features[
-            f"{prefix}_horizontal_coverage"
-            if vertical
-            else f"{prefix}_vertical_coverage"
-        ]
-        if (
-            features[f"{prefix}_containment"] >= config.figure_edge_child_coverage
-            and features[f"{prefix}_center_inside_{'b' if prefix == 'a' else 'a'}"]
-            and features[f"{prefix}_outside_edge_count"] == 1
-            and features[f"{prefix}_aspect_ratio"]
-            >= config.figure_edge_min_aspect_ratio
-            and orthogonal_coverage >= config.figure_edge_min_orthogonal_coverage
-            and features["area_ratio"]
-            <= config.figure_edge_max_child_parent_area_ratio
-        ):
-            return True
-    return False
+    return bool(
+        features["intersection_area"] > 0
+        and (
+            b.get("type") == "Figure"
+            and a.get("type") in {"Text", "Footnote", "Unknown"}
+            and features["a_center_inside_b"]
+            or a.get("type") == "Figure"
+            and b.get("type") in {"Text", "Footnote", "Unknown"}
+            and features["b_center_inside_a"]
+        )
+    )
 
 
 @dataclass

@@ -98,7 +98,7 @@ def test_small_one_edge_protrusion_is_observed_as_near_containment():
     assert relation["features"]["b_protrusion_page_ratio"] == 0.004
 
 
-def test_materially_protruding_text_is_not_treated_as_contained():
+def test_materially_protruding_text_centered_on_figure_edge_is_owned():
     result = resolve_layout_overlaps(
         [
             region("figure", "Figure", [100, 100, 800, 700]),
@@ -106,7 +106,7 @@ def test_materially_protruding_text_is_not_treated_as_contained():
         ],
         PAGES,
     )
-    assert result.relationships[0]["kind"] == "CLASS_CONFLICT"
+    assert result.relationships[0]["kind"] == "CONTAINMENT_CANDIDATE"
 
 
 def test_rotated_axis_label_crossing_one_figure_edge_is_containment_candidate():
@@ -119,13 +119,13 @@ def test_rotated_axis_label_crossing_one_figure_edge_is_containment_candidate():
     )
     relation = result.relationships[0]
     assert relation["kind"] == "CONTAINMENT_CANDIDATE"
-    assert relation["reason"] == "figure_edge_internal_text_observed"
+    assert relation["reason"] == "figure_center_owned_text_observed"
     assert relation["candidate_parent_region_id"] == "figure"
     assert relation["candidate_child_region_id"] == "axis"
     assert relation["features"]["a_containment"] < 0.72
 
 
-def test_horizontal_prose_crossing_figure_edge_is_not_axis_label_containment():
+def test_horizontal_text_with_center_inside_figure_is_owned():
     result = resolve_layout_overlaps(
         [
             region("figure", "Figure", [100, 120, 850, 530]),
@@ -133,7 +133,36 @@ def test_horizontal_prose_crossing_figure_edge_is_not_axis_label_containment():
         ],
         PAGES,
     )
-    assert result.relationships[0]["kind"] == "CLASS_CONFLICT"
+    assert result.relationships[0]["kind"] == "CONTAINMENT_CANDIDATE"
+
+
+def test_low_coverage_text_with_center_inside_figure_is_figure_owned():
+    result = resolve_layout_overlaps(
+        [
+            region("text", "Text", [90, 20, 210, 180], "embedded OCR text"),
+            region("figure", "Figure", [100, 100, 850, 530]),
+        ],
+        PAGES,
+    )
+    relation = result.relationships[0]
+    assert relation["kind"] == "CONTAINMENT_CANDIDATE"
+    assert relation["reason"] == "figure_center_owned_text_observed"
+    assert relation["candidate_parent_region_id"] == "figure"
+    assert relation["features"]["a_containment"] < 0.72
+
+
+def test_near_identical_figure_and_text_still_resolve_to_figure_ownership():
+    result = resolve_layout_overlaps(
+        [
+            region("figure", "Figure", [100, 100, 800, 700], score=0.70),
+            region("text", "Text", [101, 101, 799, 699], "embedded", score=0.99),
+        ],
+        PAGES,
+    )
+    relation = result.relationships[0]
+    assert relation["kind"] == "CONTAINMENT_CANDIDATE"
+    assert relation["reason"] == "figure_center_owned_text_observed"
+    assert len(result.regions) == 2
 
 
 def test_non_container_containment_remains_observational_for_hierarchy_policy():

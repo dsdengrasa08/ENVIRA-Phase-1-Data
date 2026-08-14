@@ -170,9 +170,10 @@ the core, then validated once after duplicate resolution and stabilized Figure
 decomposition. Directional child coverage is supplemented by a bounded, center-aware
 near-containment signal; this is deliberately not a blanket Figure margin. Only
 semantically compatible children of a trustworthy, unambiguous container receive
-nested emission. A separate high-precision edge-label path handles small elongated
-axis/annotation boxes that cross one imperfect Figure edge while retaining ordinary
-partially overlapping prose.
+nested emission. Generic Text, Footnote, and Unknown detections whose centers fall inside a Figure are
+treated as Figure-owned visual content regardless of OCR length or detector score.
+They remain in the physical/nested provenance stream but are excluded from the
+document-level layout stream. Captions continue through the separate caption safeguard.
 Text newly captured by Figure expansion, Figures exceeding the
 trusted page-area bound, nested containers, and competing parents remain top-level
 conflicts. Children already contained by the original pre-expansion Figure remain
