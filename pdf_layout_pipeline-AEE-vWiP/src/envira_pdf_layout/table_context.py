@@ -15,6 +15,7 @@ from .orientation import (
     interval_overlap_ratio,
     local_relation,
     project_bbox,
+    reliable_orientation_conflict,
     region_orientation,
 )
 from .semantic_caption import (
@@ -310,7 +311,7 @@ def _fragment_edge(
         and min(abs(angle % 180.0), abs((angle % 180.0) - 180.0)) > 12.0
     ):
         orientation_compatible = compatible_orientation(candidate, member)
-        if orientation_compatible is not False:
+        if not reliable_orientation_conflict(candidate, member):
             member_table = local_relation(mb, tb, angle)
             candidate_table = local_relation(cb, tb, angle)
             candidate_member = local_relation(cb, mb, angle)
@@ -540,7 +541,7 @@ def _fragmented_identifier_candidates(
                 rb = list(map(float, region["bbox_px"]))
                 if _intersection_area(rb, tb) > 0:
                     continue
-                if compatible_orientation(region, caption) is False:
+                if reliable_orientation_conflict(region, caption):
                     continue
                 region_table = local_relation(rb, tb, angle)
                 if region_table["side"] != caption_table["side"]:
@@ -874,11 +875,10 @@ def _retain_one_caption_side(
         if edge["proposed_role"] != "caption"
         or (
             edge["direction"] == selected_side.get(str(edge["table_region_id"]))
-            and compatible_orientation(
+            and not reliable_orientation_conflict(
                 regions_by_id[str(edge["region_id"])],
                 selected_orientation_anchor[str(edge["table_region_id"])],
             )
-            is not False
         )
     ]
 
@@ -906,7 +906,7 @@ def _reference_fragment_edge(
     if negative_reasons:
         return None
     orientation_compatible = compatible_orientation(candidate, member)
-    if orientation_compatible is False:
+    if reliable_orientation_conflict(candidate, member):
         return None
     cb = list(map(float, candidate["bbox_px"]))
     mb = list(map(float, member["bbox_px"]))

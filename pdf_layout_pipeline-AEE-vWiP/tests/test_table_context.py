@@ -440,6 +440,32 @@ def test_rotated_fragmented_identifier_beats_opposite_table_note_caption():
     assert caption["bbox_spans_table"] is False
 
 
+def test_compact_number_bbox_cannot_veto_rotated_fragment_reconstruction():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        # The word's bbox suggests a vertical axis, while the compact rotated
+        # number happens to be wider than tall and suggests a horizontal axis.
+        region("word", "Text", [150, 100, 170, 170], "Table", 1),
+        region("number", "Text", [150, 175, 200, 190], "4", 2),
+        region(
+            "description",
+            "Caption",
+            [150, 200, 190, 700],
+            "N2O emissions by treatment.",
+            3,
+            orientation=90,
+        ),
+        region("table", "Table", [205, 100, 700, 800], order=4),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert set(group["identifier_region_ids"]) == {"word", "number"}
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["text"] == "Table 4 N2O emissions by treatment."
+
+
 def test_fragmented_identifier_variants_join_a_detector_caption():
     variants = [
         (["TABLE", "IV"], "TABLE IV"),
