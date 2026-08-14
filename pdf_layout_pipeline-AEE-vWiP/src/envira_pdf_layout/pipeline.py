@@ -18,6 +18,7 @@ from .failures import (
     page_failure_budget_exceeded,
 )
 from .figure_decomposition import FigureDecompositionResult, decompose_oversized_figures
+from .equation_crops import EquationCropResult, refine_equation_visual_crops
 from .independent_core import run_independent_core
 from .layout_overlap import ResolutionResult, resolve_layout_overlaps
 from .nested_containment import (
@@ -319,6 +320,50 @@ def run_layout_pipeline(conversion, page_set, config):
     ) == len(result.top_level_regions) + len(result.nested_regions)
     result.stage_trace.append(hierarchy_snapshot)
     hierarchy_snapshot["work"] = containment_metrics
+    equation_crop_input = list(result.resolved_regions)
+    equation_crop_run = execute_stage(
+        name="equation_visual_crop_refinement",
+        operation=lambda: refine_equation_visual_crops(
+            equation_crop_input, result.pages, config.equation_crops
+        ),
+        fallback=lambda: EquationCropResult(list(equation_crop_input), [], False),
+        fallback_name="preserve_physical_crops",
+        mode=config.error_policy.mode,
+    )
+    equation_crops = equation_crop_run.value
+    result.resolved_regions = equation_crops.regions
+    result.physical_regions = equation_crops.regions
+    resolved_by_id = {
+        str(region["layout_region_id"]): region for region in result.resolved_regions
+    }
+    result.top_level_regions = [
+        resolved_by_id[str(region["layout_region_id"])]
+        for region in result.top_level_regions
+    ]
+    result.nested_regions = [
+        resolved_by_id[str(region["layout_region_id"])]
+        for region in result.nested_regions
+    ]
+    equation_crop_snapshot = snapshot(
+        "equation_visual_crop_refinement",
+        result.resolved_regions,
+        previous=hierarchy_snapshot,
+        decisions=equation_crops.decisions,
+        elapsed_ms=equation_crop_run.elapsed_ms,
+        status=equation_crop_run.status,
+    )
+    equation_crop_snapshot["fallback"] = equation_crop_run.fallback
+    result.stage_trace.append(equation_crop_snapshot)
+    result.diagnostics["equation_visual_crop_refinement"] = {
+        "changed": equation_crops.changed,
+        "decisions": equation_crops.decisions,
+    }
+    if equation_crop_run.issue:
+        result.issues.append(equation_crop_run.issue.to_dict())
+        result.failed_stages.append("equation_visual_crop_refinement")
+    else:
+        result.completed_stages.append("equation_visual_crop_refinement")
+    region_index = RegionIndex.build(result.resolved_regions, result.pages)
     # Replace observational candidates with exactly one authoritative outcome.
     result.layout_relationships = [
         relation

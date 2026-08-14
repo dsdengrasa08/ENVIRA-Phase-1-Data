@@ -238,19 +238,32 @@ def render_figure_boundary_refinement_overlay(
     image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError(page["page_image_path"])
-    proposals = run.diagnostics.get("figure_boundary_refinement", {}).get("proposals", [])
+    proposals = run.diagnostics.get("figure_boundary_refinement", {}).get(
+        "proposals", []
+    )
     for proposal in proposals:
         if int(proposal["page_number"]) != int(page_number):
             continue
         for change in proposal.get("changes", []):
             source = int_bbox(tuple(change["source_bbox_px"]))
             resolved = int_bbox(tuple(change["resolved_bbox_px"]))
-            cv2.rectangle(image, source[:2], source[2:], (160, 160, 160), 2, cv2.LINE_AA)
-            cv2.rectangle(image, resolved[:2], resolved[2:], (0, 180, 0), 3, cv2.LINE_AA)
-            _label(image, f"refined {change['edge']}", (resolved[0] + 3, max(18, resolved[1] + 16)), (0, 180, 0))
+            cv2.rectangle(
+                image, source[:2], source[2:], (160, 160, 160), 2, cv2.LINE_AA
+            )
+            cv2.rectangle(
+                image, resolved[:2], resolved[2:], (0, 180, 0), 3, cv2.LINE_AA
+            )
+            _label(
+                image,
+                f"refined {change['edge']}",
+                (resolved[0] + 3, max(18, resolved[1] + 16)),
+                (0, 180, 0),
+            )
         if not proposal.get("changes"):
             _label(image, proposal["decision"], (24, 58), (0, 150, 255))
-    _label(image, f"Figure boundary refinement | page {page_number}", (24, 36), (0, 0, 255))
+    _label(
+        image, f"Figure boundary refinement | page {page_number}", (24, 36), (0, 0, 255)
+    )
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_path), image)
@@ -280,6 +293,42 @@ def render_resolved_layout_overlays(run, save=True):
         )
         for page in run.pages
     ]
+
+
+def render_equation_crop_overlay(run, page_number, output_path: Path | None = None):
+    """Show physical Equation boxes and their constrained visual crop extents."""
+    import cv2
+
+    page = next(p for p in run.pages if int(p["page_number"]) == int(page_number))
+    image = cv2.imread(str(page["page_image_path"]), cv2.IMREAD_COLOR)
+    if image is None:
+        raise FileNotFoundError(page["page_image_path"])
+    for region in run.resolved_regions:
+        if int(region["page_number"]) != int(page_number) or region.get("type") not in {
+            "Formula",
+            "Equation",
+        }:
+            continue
+        physical = int_bbox(tuple(region["bbox_px"]))
+        crop = int_bbox(tuple(region.get("visual_crop_bbox_px") or region["bbox_px"]))
+        cv2.rectangle(image, physical[:2], physical[2:], _COLORS["Formula"], 2)
+        cv2.rectangle(image, crop[:2], crop[2:], (0, 140, 255), 1)
+        _label(
+            image,
+            "Equation physical/crop",
+            (crop[0] + 3, max(18, crop[1] + 16)),
+            (0, 140, 255),
+        )
+    _label(
+        image,
+        f"Equation visual crops | page {page_number}",
+        (24, 36),
+        (0, 0, 255),
+    )
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+    return Overlay(page_number, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), output_path)
 
 
 def render_table_context_overlay(run, page_number, output_path: Path | None = None):
