@@ -8,6 +8,7 @@ from time import perf_counter
 
 from .caption_overlap import annotate_caption_members, build_caption_groups
 from .caption_association import associate_captions
+from .boundary_refinement import BoundaryRefinementResult, refine_figure_boundaries
 from .artifact_validation import validate_relationship_graph
 from .failures import (
     PipelineIssue,
@@ -133,6 +134,64 @@ def run_layout_pipeline(conversion, page_set, config):
     else:
         result.completed_stages.append("overlap_resolution")
     result.stage_trace.append(overlap_snapshot)
+    refinement_input = list(result.resolved_regions)
+    provisional_refinement_captions = associate_captions(
+        refinement_input,
+        result.pages,
+        config=config.caption_association,
+    )
+    refinement_run = execute_stage(
+        name="figure_boundary_refinement",
+        operation=lambda: refine_figure_boundaries(
+            refinement_input,
+            result.pages,
+            config.figures,
+            provisional_refinement_captions,
+        ),
+        fallback=lambda: BoundaryRefinementResult(
+            list(refinement_input), [], {"fallback": "preserve_source_geometry"}, False
+        ),
+        fallback_name="preserve_source_geometry",
+        mode=config.error_policy.mode,
+    )
+    refinement = refinement_run.value
+    if refinement.changed:
+        # Geometry changed, so every overlap feature and duplicate observation must
+        # be derived again instead of retaining stale source-box relationships.
+        refined_resolution = resolve_layout_overlaps(
+            refinement.regions,
+            result.pages,
+            config.overlap_resolution,
+            config.containment,
+        )
+        result.resolved_regions = refined_resolution.regions
+        result.layout_relationships = list(refined_resolution.relationships)
+        result.resolution_decisions = list(resolution.decisions) + list(
+            refined_resolution.decisions
+        )
+        result.suppressed_regions = list(resolution.suppressed) + list(
+            refined_resolution.suppressed
+        )
+        effective_resolution = refined_resolution
+    else:
+        result.resolved_regions = refinement.regions
+        effective_resolution = resolution
+    result.diagnostics["figure_boundary_refinement"] = refinement.diagnostics
+    refinement_snapshot = snapshot(
+        "figure_boundary_refinement",
+        result.resolved_regions,
+        previous=overlap_snapshot,
+        decisions=refinement.proposals,
+        elapsed_ms=refinement_run.elapsed_ms,
+        status=refinement_run.status,
+    )
+    refinement_snapshot["fallback"] = refinement_run.fallback
+    result.stage_trace.append(refinement_snapshot)
+    if refinement_run.issue:
+        result.issues.append(refinement_run.issue.to_dict())
+        result.failed_stages.append("figure_boundary_refinement")
+    else:
+        result.completed_stages.append("figure_boundary_refinement")
     decomposition_input = list(result.resolved_regions)
     decomposition_run = execute_stage(
         name="figure_decomposition",
@@ -146,9 +205,7 @@ def run_layout_pipeline(conversion, page_set, config):
                 config=config.caption_association,
             ),
         ),
-        fallback=lambda: FigureDecompositionResult(
-            list(decomposition_input), [], []
-        ),
+        fallback=lambda: FigureDecompositionResult(list(decomposition_input), [], []),
         fallback_name="preserve_original_figures",
         mode=config.error_policy.mode,
     )
@@ -171,18 +228,19 @@ def run_layout_pipeline(conversion, page_set, config):
         result.resolved_regions = rerun.regions
         result.layout_relationships = list(rerun.relationships)
         result.resolution_decisions = rerun.decisions
-        result.suppressed_regions = list(resolution.suppressed) + list(
-            decomposition.replaced_regions
-        ) + list(rerun.suppressed)
+        result.suppressed_regions = (
+            list(result.suppressed_regions)
+            + list(decomposition.replaced_regions)
+            + list(rerun.suppressed)
+        )
         effective_resolution = rerun
     else:
         result.resolved_regions = decomposition.regions
-        effective_resolution = resolution
     result.diagnostics["figure_decomposition"] = decomposition.diagnostics
     decomposition_snapshot = snapshot(
         "figure_decomposition",
         result.resolved_regions,
-        previous=overlap_snapshot,
+        previous=refinement_snapshot,
         decisions=decomposition.proposals,
         elapsed_ms=decomposition_run.elapsed_ms,
         status=decomposition_run.status,

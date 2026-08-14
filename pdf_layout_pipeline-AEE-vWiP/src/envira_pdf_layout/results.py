@@ -100,6 +100,13 @@ def figure_decomposition_proposals_dataframe(run):
     )
 
 
+def figure_boundary_refinement_proposals_dataframe(run):
+    """Return accepted and conservatively preserved edge-refinement hypotheses."""
+    return pd.DataFrame(
+        run.diagnostics.get("figure_boundary_refinement", {}).get("proposals", [])
+    )
+
+
 def layout_relationships_dataframe(run):
     """Return every generalized duplicate, hierarchy, conflict, and association edge."""
     return pd.DataFrame(run.layout_relationships)
