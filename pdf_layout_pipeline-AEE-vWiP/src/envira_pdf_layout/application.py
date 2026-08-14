@@ -197,11 +197,17 @@ def run_pdf(
         recorder.emit("backend_conversion_started", stage="backend_conversion", status="running")
         conversion_started = monotonic()
         conversion = backend.convert(
-            document.pdf_path, (document.page_start, document.page_end)
+            document.pdf_path,
+            (document.page_start, document.page_end),
+            materialize_markdown=config.privacy.export_raw_markdown,
         )
         recorder.emit("backend_conversion_completed", stage="backend_conversion", status="completed", elapsed_ms=(monotonic() - conversion_started) * 1000)
         cancellation.check()
-        result = run_layout_pipeline(conversion, pages, config)
+        from .page_resources import bind_page_image_cache
+
+        with bind_page_image_cache() as page_image_cache:
+            result = run_layout_pipeline(conversion, pages, config)
+            page_image_metrics = page_image_cache.diagnostics()
         result.diagnostics["application"] = {
             "run_id": run_id,
             "attempt": attempt,
@@ -213,6 +219,7 @@ def run_pdf(
             "remote_services_verified_disabled": not config.security.allow_remote_services,
             "model_verification": models.get("verification"),
             "backend_capabilities": backend.capabilities,
+            "page_image_cache": page_image_metrics,
         }
         fingerprint = environment_fingerprint(
             config_sha256=effective_config_sha256(config),

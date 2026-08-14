@@ -11,15 +11,14 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
 
 from .geometry import bbox_area, intersection_area
 from .schema import apply_geometry_change, initialize_region_schema
 from .types import LayoutRegion
+from .page_resources import load_page_image
 
 
 PROTECTED_TYPES = {"Caption", "Table", "Formula", "Section-header", "Title"}
@@ -275,9 +274,9 @@ def refine_figure_boundaries(
     caption_relationships: list[dict[str, Any]] | None = None,
 ) -> BoundaryRefinementResult:
     """Refine unsupported Figure edges where independent semantic objects compete."""
-    working = deepcopy(regions)
     if not config.refine_boundaries:
-        return BoundaryRefinementResult(working, [], {"enabled": False}, False)
+        return BoundaryRefinementResult(list(regions), [], {"enabled": False}, False)
+    working = deepcopy(regions)
     page_map = {int(p["page_number"]): p for p in pages}
     by_page: dict[int, list[LayoutRegion]] = defaultdict(list)
     for region in working:
@@ -289,9 +288,8 @@ def refine_figure_boundaries(
         page = page_map.get(page_number)
         if not page:
             continue
-        try:
-            image = np.asarray(Image.open(Path(page["page_image_path"])).convert("L"))
-        except (FileNotFoundError, OSError):
+        image = load_page_image(page["page_image_path"], "L")
+        if image is None:
             continue
         page_w, page_h = _page_size(page)
         page_area = page_w * page_h

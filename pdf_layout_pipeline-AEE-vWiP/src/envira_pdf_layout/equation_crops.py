@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 import re
 from typing import Any
 
@@ -17,6 +16,7 @@ import numpy as np
 from .config import EquationCropConfig
 from .geometry import clip_bbox, intersection_area
 from .types import LayoutRegion
+from .page_resources import load_page_image
 
 
 FORMULA_TYPES = {"Formula", "Equation"}
@@ -67,14 +67,7 @@ def _axis_overlap(a0: float, a1: float, b0: float, b1: float) -> float:
 
 def _load_gray(page: dict[str, Any]) -> np.ndarray | None:
     path = page.get("page_image_path")
-    if not path or not Path(path).is_file():
-        return None
-    try:
-        from PIL import Image
-
-        return np.asarray(Image.open(path).convert("L"))
-    except (OSError, ValueError):
-        return None
+    return load_page_image(path, "L") if path else None
 
 
 def _already_has_margin(
@@ -140,9 +133,11 @@ def refine_equation_visual_crops(
 ) -> EquationCropResult:
     """Add a bounded whitespace collar to Formula/Equation visual crops."""
     config = config or EquationCropConfig()
-    working = deepcopy(regions)
     if not config.enabled:
-        return EquationCropResult(working, [], False)
+        return EquationCropResult(list(regions), [], False)
+    if not any(region.get("type") in FORMULA_TYPES for region in regions):
+        return EquationCropResult(list(regions), [], False)
+    working = deepcopy(regions)
     page_map = {int(page["page_number"]): page for page in pages}
     by_id = {str(region["layout_region_id"]): region for region in working}
     decisions: list[dict[str, Any]] = []

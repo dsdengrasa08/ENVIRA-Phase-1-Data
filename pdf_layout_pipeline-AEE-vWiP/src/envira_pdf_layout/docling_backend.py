@@ -92,7 +92,13 @@ class DoclingBackend:
         )
         return cls(converter, capabilities)
 
-    def convert(self, pdf_path: Path, page_range: tuple[int, int]) -> DoclingConversion:
+    def convert(
+        self,
+        pdf_path: Path,
+        page_range: tuple[int, int],
+        *,
+        materialize_markdown: bool = True,
+    ) -> DoclingConversion:
         result = self.converter.convert(str(pdf_path), page_range=page_range)
         document = result.document
         markdown_method = getattr(document, "export_to_markdown", None)
@@ -100,5 +106,7 @@ class DoclingBackend:
             result,
             document,
             docling_document_to_dict(document),
-            markdown_method() if callable(markdown_method) else "",
+            markdown_method()
+            if materialize_markdown and callable(markdown_method)
+            else "",
         )
