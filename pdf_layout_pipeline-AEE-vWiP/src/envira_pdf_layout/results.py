@@ -21,7 +21,12 @@ def raw_label_counts_dataframe(regions):
 
 
 def regions_dataframe(run):
-    """Compatibility view of core-filtered regions; prefer explicit hierarchy views."""
+    """Return the consumer-facing, hierarchy-resolved document layout stream."""
+    return pd.DataFrame(run.document_regions)
+
+
+def legacy_final_regions_dataframe(run):
+    """Return the pre-hierarchy compatibility view for migration diagnostics only."""
     return pd.DataFrame(run.final_regions)
 
 

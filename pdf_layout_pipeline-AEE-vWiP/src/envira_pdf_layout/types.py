@@ -141,6 +141,15 @@ class PipelineResult:
     completed_stages: list[str] = field(default_factory=list)
     failed_stages: list[str] = field(default_factory=list)
 
+    @property
+    def document_regions(self) -> list[LayoutRegion]:
+        """Return the hierarchy-resolved document-level layout stream.
+
+        ``resolved_regions`` remains the provenance-preserving physical view and
+        ``final_regions`` remains a legacy pre-hierarchy compatibility artifact.
+        """
+        return self.top_level_regions
+
 
 @dataclass(frozen=True)
 class ExportManifest:

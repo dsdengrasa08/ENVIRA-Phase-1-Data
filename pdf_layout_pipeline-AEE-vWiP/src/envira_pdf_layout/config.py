@@ -280,6 +280,13 @@ class ContainmentConfig:
     panel_label_max_chars: int = 12
     body_paragraph_min_chars: int = 80
     caption_identifier_max_chars: int = 24
+    near_child_coverage: float = 0.82
+    near_max_edge_protrusion_page_ratio: float = 0.004
+    trusted_figure_max_page_area_ratio: float = 0.65
+    figure_edge_child_coverage: float = 0.60
+    figure_edge_min_aspect_ratio: float = 3.0
+    figure_edge_min_orthogonal_coverage: float = 0.85
+    figure_edge_max_child_parent_area_ratio: float = 0.05
 
 
 @dataclass(frozen=True)
