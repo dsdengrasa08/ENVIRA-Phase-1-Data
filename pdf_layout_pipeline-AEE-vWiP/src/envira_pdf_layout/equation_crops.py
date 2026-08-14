@@ -207,7 +207,13 @@ def refine_equation_visual_crops(
         equation_h = max(1.0, source[3] - source[1])
         cap = config.maximum_margin_page_ratio * min(page_w, page_h)
         desired_x = min(equation_h * config.horizontal_margin_height_ratio, cap)
-        desired_y = min(equation_h * config.vertical_margin_height_ratio, cap)
+        desired_y = min(
+            max(
+                equation_h * config.vertical_margin_height_ratio,
+                page_h * config.minimum_vertical_margin_page_ratio,
+            ),
+            cap,
+        )
         clearance = equation_h * config.minimum_clearance_height_ratio
         column_left, column_right = _column_limits(target, working, page_w)
         limits = [column_left, 0.0, column_right, page_h]

@@ -169,6 +169,15 @@ def test_default_profile_uses_confirmatory_heuristics_and_auditable_policy():
     assert config.content_policy.preserve_excluded_sections_in_secondary_stream
 
 
+def test_colab_profile_exposes_equation_crop_controls():
+    profile = Path(__file__).parents[1] / "config" / "colab.yaml"
+    config = PipelineConfig.load(profile, environ={})
+    assert config.equation_crops.enabled
+    assert config.equation_crops.vertical_margin_height_ratio == 0.30
+    assert config.equation_crops.minimum_vertical_margin_page_ratio == 0.006
+    assert config.equation_crops.maximum_margin_page_ratio == 0.018
+
+
 def test_unknown_publisher_profile_is_rejected():
     with pytest.raises(ValueError, match="Unknown publisher profile"):
         PipelineConfig.load(

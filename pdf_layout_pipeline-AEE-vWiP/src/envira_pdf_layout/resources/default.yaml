@@ -129,6 +129,7 @@ equation_crops:
   enabled: true
   horizontal_margin_height_ratio: 0.35
   vertical_margin_height_ratio: 0.30
+  minimum_vertical_margin_page_ratio: 0.006
   minimum_clearance_height_ratio: 0.12
   maximum_margin_page_ratio: 0.018
   neighbor_corridor_overlap_ratio: 0.20

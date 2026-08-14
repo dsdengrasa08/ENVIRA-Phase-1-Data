@@ -145,6 +145,9 @@ Displayed `Formula` and `Equation` regions receive a scale-aware whitespace coll
 in `visual_crop_bbox_px` after overlap correction and hierarchy stabilization.
 Each edge is constrained independently by protected semantic neighbors, peer
 Equations, structural parents, inferred columns, visible page ink, and page bounds.
+Vertical expansion has both an Equation-height target and a page-scale minimum, so
+very short detector boxes receive the same visible upper/lower treatment as taller
+Equations when neighboring whitespace permits it.
 Nearby Equations share free space without merging, while a baseline-aligned
 parenthesized identifier may be included as an associated Equation number. The
 authoritative `bbox_px`, `resolved_bbox_px`, physical geometry, and reading order

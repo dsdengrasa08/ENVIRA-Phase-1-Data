@@ -290,6 +290,7 @@ class EquationCropConfig:
     enabled: bool = True
     horizontal_margin_height_ratio: float = 0.35
     vertical_margin_height_ratio: float = 0.30
+    minimum_vertical_margin_page_ratio: float = 0.006
     minimum_clearance_height_ratio: float = 0.12
     maximum_margin_page_ratio: float = 0.018
     neighbor_corridor_overlap_ratio: float = 0.20
@@ -834,6 +835,7 @@ class PipelineConfig:
         for name in (
             "horizontal_margin_height_ratio",
             "vertical_margin_height_ratio",
+            "minimum_vertical_margin_page_ratio",
             "minimum_clearance_height_ratio",
             "maximum_margin_page_ratio",
             "neighbor_corridor_overlap_ratio",

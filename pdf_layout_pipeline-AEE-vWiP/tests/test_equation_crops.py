@@ -53,6 +53,15 @@ def test_isolated_equation_gets_scale_aware_visual_margin_only():
     assert result.changed is True
 
 
+def test_short_equation_uses_page_scale_minimum_vertical_margin():
+    source = region("eq", "Formula", [300, 300, 600, 310], "x=y")
+    result = refined([source])
+    crop = result.regions[0]["visual_crop_bbox_px"]
+    assert crop[1] == 294.0
+    assert crop[3] == 316.0
+    assert result.decisions[0]["desired_margin_px"]["vertical"] == 6.0
+
+
 def test_text_above_and_below_independently_limit_vertical_edges():
     regions = [
         region("above", "Text", [250, 200, 650, 292], "above"),
