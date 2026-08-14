@@ -1,6 +1,8 @@
 from envira_pdf_layout.semantic_caption import (
     body_reference_evidence,
+    caption_reference_quality,
     find_table_reference_mention,
+    leading_table_label_fragment,
     parse_semantic_caption_reference,
 )
 
@@ -47,3 +49,29 @@ def test_embedded_singular_table_mention_is_available_only_as_fragment_evidence(
     mention = find_table_reference_mention("See Table 2 for treatment codes.")
     assert mention and mention.number == "2" and mention.position == "embedded"
     assert find_table_reference_mention("Results from Tables 3 and 4 differ.") is None
+
+
+def test_note_derived_lowercase_letter_identifier_is_not_authoritative():
+    text = "Table a See Table 2 for treatment codes."
+    reference = parse_semantic_caption_reference(text)
+    quality = caption_reference_quality(text, reference)
+    assert reference and reference.number == "a"
+    assert quality["authoritative"] is False
+    assert quality["reasons"] == [
+        "lowercase_single_letter_identifier",
+        "table_note_continuation",
+        "immediate_trailing_table_reference",
+    ]
+
+
+def test_legitimate_uppercase_letter_identifier_remains_authoritative():
+    text = "Table A. Experimental outcomes"
+    reference = parse_semantic_caption_reference(text)
+    quality = caption_reference_quality(text, reference)
+    assert reference and reference.number == "A"
+    assert quality["authoritative"] is True
+
+
+def test_bare_table_label_can_be_completed_by_a_neighboring_number():
+    assert leading_table_label_fragment("Table Average N2O flux") == "Table"
+    assert leading_table_label_fragment("Table 4. Average N2O flux") is None

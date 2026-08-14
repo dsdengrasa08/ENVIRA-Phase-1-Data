@@ -68,6 +68,28 @@ def compatible_orientation(
     return distance <= tolerance_degrees
 
 
+def reliable_orientation_conflict(
+    left: dict[str, Any], right: dict[str, Any], *, minimum_confidence: float = 0.75
+) -> bool:
+    """Whether an orientation mismatch is strong enough to reject a relation.
+
+    A compact rotated glyph can have a wide axis-aligned bbox and therefore look
+    horizontal even when it belongs to a vertical caption. ``bbox_axis`` is only
+    a low-confidence axis hint, so it must not veto stronger lane and semantic
+    evidence. Explicit upstream directions still form a hard conflict.
+    """
+    if compatible_orientation(left, right) is not False:
+        return False
+    left_orientation = region_orientation(left)
+    right_orientation = region_orientation(right)
+    return (
+        left_orientation["source"] != "bbox_axis"
+        and right_orientation["source"] != "bbox_axis"
+        and float(left_orientation["confidence"]) >= minimum_confidence
+        and float(right_orientation["confidence"]) >= minimum_confidence
+    )
+
+
 @dataclass(frozen=True)
 class LocalBox:
     inline_min: float
