@@ -179,8 +179,18 @@ def run_pdf(
             raise DependencyUnavailableError(str(exc)) from exc
         recorder.emit("models_validated", status="completed", counters={"model_cache_bytes": int(models["size_mb"] * 1024 * 1024)})
         cancellation.check()
-        pages = prepare_pages(document, config.document.render_dpi)
-        recorder.emit("pages_rendered", status="completed", counters={"pages_total": len(pages.pages)})
+        page_metrics: dict[str, int] = {}
+        pages = prepare_pages(
+            document,
+            config.document.render_dpi,
+            materialize_page_pdfs=config.document.materialize_page_pdfs,
+            metrics=page_metrics,
+        )
+        recorder.emit(
+            "pages_rendered",
+            status="completed",
+            counters={"pages_total": len(pages.pages), **page_metrics},
+        )
         backend = DoclingBackend.from_config(
             config.docling, models["artifact_path"], config.security
         )
