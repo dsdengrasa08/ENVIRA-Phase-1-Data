@@ -136,10 +136,12 @@ def run_layout_pipeline(conversion, page_set, config):
         result.completed_stages.append("overlap_resolution")
     result.stage_trace.append(overlap_snapshot)
     refinement_input = list(result.resolved_regions)
+    refinement_index = RegionIndex.build(refinement_input, result.pages)
     provisional_refinement_captions = associate_captions(
         refinement_input,
         result.pages,
         config=config.caption_association,
+        index=refinement_index,
     )
     refinement_run = execute_stage(
         name="figure_boundary_refinement",
@@ -177,6 +179,15 @@ def run_layout_pipeline(conversion, page_set, config):
     else:
         result.resolved_regions = refinement.regions
         effective_resolution = resolution
+    if refinement.changed:
+        decomposition_captions = associate_captions(
+            result.resolved_regions,
+            result.pages,
+            config=config.caption_association,
+            index=RegionIndex.build(result.resolved_regions, result.pages),
+        )
+    else:
+        decomposition_captions = provisional_refinement_captions
     result.diagnostics["figure_boundary_refinement"] = refinement.diagnostics
     refinement_snapshot = snapshot(
         "figure_boundary_refinement",
@@ -200,11 +211,7 @@ def run_layout_pipeline(conversion, page_set, config):
             decomposition_input,
             result.pages,
             config.figures,
-            associate_captions(
-                decomposition_input,
-                result.pages,
-                config=config.caption_association,
-            ),
+            decomposition_captions,
         ),
         fallback=lambda: FigureDecompositionResult(list(decomposition_input), [], []),
         fallback_name="preserve_original_figures",
@@ -257,11 +264,15 @@ def run_layout_pipeline(conversion, page_set, config):
     # Caption semantics protect a genuine document-level caption before spatial
     # hierarchy decides whether a detection belongs inside an asset.  The final
     # association pass still runs after hierarchy to publish authoritative edges.
-    provisional_caption_associations = associate_captions(
-        result.resolved_regions,
-        result.pages,
-        config=config.caption_association,
-        index=region_index,
+    provisional_caption_associations = (
+        associate_captions(
+            result.resolved_regions,
+            result.pages,
+            config=config.caption_association,
+            index=region_index,
+        )
+        if decomposition.replaced_regions
+        else decomposition_captions
     )
     protected_caption_ids = _protected_caption_ids(
         provisional_caption_associations,

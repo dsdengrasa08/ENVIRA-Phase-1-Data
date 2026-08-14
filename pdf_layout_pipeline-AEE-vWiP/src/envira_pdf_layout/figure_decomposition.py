@@ -10,13 +10,13 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from .caption_association import parse_caption_reference
 from .config import FigureFilterConfig
 from .schema import initialize_region_schema
 from .types import LayoutRegion
+from .page_resources import load_page_image
 
 
 @dataclass(frozen=True)
@@ -292,8 +292,6 @@ def decompose_oversized_figures(
     """Return derived Figures only when semantic, visual, and assignment evidence agree."""
     if not config.decompose_oversized:
         return FigureDecompositionResult(list(regions), [], [])
-    from PIL import Image
-
     working = deepcopy(regions)
     page_map = {int(page["page_number"]): page for page in pages}
     page_images: dict[int, Any] = {}
@@ -326,10 +324,7 @@ def decompose_oversized_figures(
             continue
         image = page_images.get(page_number)
         if image is None:
-            try:
-                image = Image.open(Path(page["page_image_path"])).convert("RGB")
-            except (FileNotFoundError, OSError):
-                image = None
+            image = load_page_image(page["page_image_path"], "RGB")
             page_images[page_number] = image
         base = {
             "page_number": page_number,
