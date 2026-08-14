@@ -139,6 +139,23 @@ and a hashed manifest, and finish with exactly one `_SUCCESS`, `_PARTIAL`, or
 `retry.build_retry_plan` reads page diagnostics and permits selective retry only
 when the source PDF hash and effective configuration match the prior run.
 
+## Equation visual crops
+
+Displayed `Formula` and `Equation` regions receive a scale-aware whitespace collar
+in `visual_crop_bbox_px` after overlap correction and hierarchy stabilization.
+Each edge is constrained independently by protected semantic neighbors, peer
+Equations, structural parents, inferred columns, visible page ink, and page bounds.
+Nearby Equations share free space without merging, while a baseline-aligned
+parenthesized identifier may be included as an associated Equation number. The
+authoritative `bbox_px`, `resolved_bbox_px`, physical geometry, and reading order
+remain unchanged; downstream Equation image extraction should use
+`equation_crops.equation_crop_bbox(region)`. Decisions and blockers are published
+under the `equation_visual_crop_refinement` diagnostic, and
+`render_equation_crop_overlay` compares physical and crop extents.
+The standard semantic and resolved overlays also draw Formula/Equation regions
+with this visual crop, so the displayed yellow Equation box matches the extent
+that downstream Equation image extraction receives.
+
 ## Generalized overlap resolution
 
 The maintained pipeline resolves overlaps after the preserved core filters and

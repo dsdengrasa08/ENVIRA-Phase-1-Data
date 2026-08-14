@@ -284,6 +284,21 @@ class OverlapResolutionConfig:
 
 
 @dataclass(frozen=True)
+class EquationCropConfig:
+    """Scale-aware, non-semantic padding for displayed Equation crops."""
+
+    enabled: bool = True
+    horizontal_margin_height_ratio: float = 0.35
+    vertical_margin_height_ratio: float = 0.30
+    minimum_clearance_height_ratio: float = 0.12
+    maximum_margin_page_ratio: float = 0.018
+    neighbor_corridor_overlap_ratio: float = 0.20
+    equation_number_max_gap_page_ratio: float = 0.20
+    ink_threshold: int = 235
+    minimum_ink_pixels: int = 3
+
+
+@dataclass(frozen=True)
 class ContainmentConfig:
     """Single source of thresholds for observational containment and hierarchy."""
 
@@ -406,6 +421,7 @@ class PipelineConfig:
     overlap_resolution: OverlapResolutionConfig = field(
         default_factory=OverlapResolutionConfig
     )
+    equation_crops: EquationCropConfig = field(default_factory=EquationCropConfig)
     containment: ContainmentConfig = field(default_factory=ContainmentConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -445,6 +461,7 @@ class PipelineConfig:
             "caption_overlap": CaptionOverlapConfig,
             "caption_association": CaptionAssociationConfig,
             "overlap_resolution": OverlapResolutionConfig,
+            "equation_crops": EquationCropConfig,
             "containment": ContainmentConfig,
             "export": ExportConfig,
             "security": SecurityConfig,
@@ -642,7 +659,10 @@ class PipelineConfig:
             and self.operational.total_run_timeout_seconds < 1
         ):
             raise ValueError("operational.total_run_timeout_seconds must be positive")
-        if self.docling.auto_download_models and self.security.allow_remote_services is False:
+        if (
+            self.docling.auto_download_models
+            and self.security.allow_remote_services is False
+        ):
             raise ValueError(
                 "docling.auto_download_models requires security.allow_remote_services"
             )
@@ -810,6 +830,21 @@ class PipelineConfig:
         for name in ("duplicate_edge_page_ratio", "fragment_max_gap_page_ratio"):
             if getattr(generalized, name) < 0:
                 raise ValueError(f"overlap resolution {name} must be non-negative")
+        equation_crops = self.equation_crops
+        for name in (
+            "horizontal_margin_height_ratio",
+            "vertical_margin_height_ratio",
+            "minimum_clearance_height_ratio",
+            "maximum_margin_page_ratio",
+            "neighbor_corridor_overlap_ratio",
+            "equation_number_max_gap_page_ratio",
+        ):
+            if not 0 <= getattr(equation_crops, name) <= 1:
+                raise ValueError(f"equation crops {name} must be in [0, 1]")
+        if not 0 <= equation_crops.ink_threshold <= 255:
+            raise ValueError("equation crops ink_threshold must be in [0, 255]")
+        if equation_crops.minimum_ink_pixels < 1:
+            raise ValueError("equation crops minimum_ink_pixels must be positive")
         for name in (
             "strong_child_coverage",
             "center_child_coverage",
@@ -829,7 +864,9 @@ class PipelineConfig:
         if not self.headers.roi_ocr_language.strip():
             raise ValueError("headers roi_ocr_language must not be empty")
         if self.figures.decomposition_min_caption_identities < 2:
-            raise ValueError("figures decomposition requires at least two caption identities")
+            raise ValueError(
+                "figures decomposition requires at least two caption identities"
+            )
         for name in (
             "decomposition_min_component_area_ratio",
             "decomposition_max_foreground_bridge_ratio",
@@ -868,8 +905,17 @@ class PipelineConfig:
             if getattr(self.security, name) < 1:
                 raise ValueError(f"security.{name} must be positive")
         if self.security.secure_file_mode & 0o077:
-            raise ValueError("security.secure_file_mode must not grant group/other access")
+            raise ValueError(
+                "security.secure_file_mode must not grant group/other access"
+            )
         if self.security.secure_directory_mode & 0o077:
-            raise ValueError("security.secure_directory_mode must not grant group/other access")
-        if self.privacy.diagnostics_detail not in {"minimal", "standard", "debug", "full"}:
+            raise ValueError(
+                "security.secure_directory_mode must not grant group/other access"
+            )
+        if self.privacy.diagnostics_detail not in {
+            "minimal",
+            "standard",
+            "debug",
+            "full",
+        }:
             raise ValueError("privacy.diagnostics_detail is invalid")
