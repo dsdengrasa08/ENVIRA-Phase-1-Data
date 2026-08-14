@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import combinations
 import re
 from typing import Any
 
@@ -18,6 +19,7 @@ from .orientation import (
 )
 from .semantic_caption import (
     body_reference_evidence,
+    caption_reference_quality,
     find_table_reference_mention,
     parse_fragmented_table_reference,
     parse_semantic_caption_reference,
@@ -26,6 +28,11 @@ from .semantic_caption import (
 _NOTE_RE = re.compile(
     r"^\s*(?:notes?|sources?)\s*:|^\s*(?:[*†‡]|[a-z])(?:[.)]|\s{1,3})\s+|"
     r"\b[pP]\s*[<=>]\s*\.?\d+",
+    re.IGNORECASE,
+)
+_TABLE_NOTE_TEXT_RE = re.compile(
+    r"^(?:[a-z*†‡][.)]?\s+)?(?:see\s+table\b|means?\s+(?:within|followed)\b|"
+    r"values?\s+in\s+parentheses\b|treatment\s+codes?\b)",
     re.IGNORECASE,
 )
 _BODY_SENTENCE_RE = re.compile(r"^[A-Z][^.!?]{35,}[.!?](?:\s|$)")
@@ -184,6 +191,9 @@ def _score_edge(
     if role == "caption" and other_asset_kind:
         return None
     label_match = _table_reference(text, tolerant=True)
+    reference_quality = caption_reference_quality(text, label_match)
+    if role == "caption" and label_match and not reference_quality["authoritative"]:
+        return None
     negative_reasons = [] if label_match else body_reference_evidence(text)
     note_match = _NOTE_RE.search(text)
     style = candidate.get("typography") or {}
@@ -213,17 +223,15 @@ def _score_edge(
         "raw_class": (
             2.0
             if role == "caption" and candidate.get("type") == "Caption"
-            else 1.4
-            if role == "note" and candidate.get("type") == "Footnote"
-            else 0.0
+            else 1.4 if role == "note" and candidate.get("type") == "Footnote" else 0.0
         ),
         "identifier_lexical": 1.8 if label_match and role == "caption" else 0.0,
         "note_lexical": 1.5 if note_match and role == "note" else 0.0,
         "body_paragraph_penalty": -3.2 if _BODY_SENTENCE_RE.search(text) else 0.0,
         "body_reference_penalty": -6.0 if negative_reasons else 0.0,
-        "ocr_tolerance_penalty": -0.5
-        if label_match and label_match.ocr_tolerant
-        else 0.0,
+        "ocr_tolerance_penalty": (
+            -0.5 if label_match and label_match.ocr_tolerant else 0.0
+        ),
         "typography": (
             0.4 if (role == "note" and (is_italic or has_superscript)) else 0.0
         ),
@@ -251,6 +259,7 @@ def _score_edge(
             label_match and text[label_match.end :].strip()
         ),
         "semantic_reference": label_match.__dict__ if label_match else None,
+        "semantic_reference_quality": reference_quality if label_match else None,
         "negative_reasons": negative_reasons,
     }
 
@@ -296,7 +305,10 @@ def _fragment_edge(
     tb = list(map(float, table["bbox_px"]))
     member_orientation = region_orientation(member)
     angle = member_orientation["angle_degrees"]
-    if angle is not None and min(abs(angle % 180.0), abs((angle % 180.0) - 180.0)) > 12.0:
+    if (
+        angle is not None
+        and min(abs(angle % 180.0), abs((angle % 180.0) - 180.0)) > 12.0
+    ):
         orientation_compatible = compatible_orientation(candidate, member)
         if orientation_compatible is not False:
             member_table = local_relation(mb, tb, angle)
@@ -460,7 +472,14 @@ def _fragmented_identifier_candidates(
     page_width: float,
     page_height: float,
 ) -> list[LayoutRegion]:
-    """Build provenance-only virtual anchors from two or three adjacent text boxes."""
+    """Build provenance-only anchors from locally ordered identifier fragments.
+
+    Detector reading order is page-axis based and is therefore only a fallback.
+    When a detector-class Caption already exists, search the caption lane in its
+    local orientation and reconstruct a bounded semantic prefix there.  Physical
+    source regions remain immutable; the returned regions exist only long enough
+    to participate in table ownership scoring.
+    """
     text_regions = [
         region
         for region in sorted(page_regions, key=_order)
@@ -468,7 +487,165 @@ def _fragmented_identifier_candidates(
         and str(region.get("text") or "").strip()
     ]
     output: list[LayoutRegion] = []
+    emitted: set[tuple[str, ...]] = set()
     claimed: set[str] = set()
+
+    def emit(members, reference, combined, *, table_id=None, orientation=None):
+        member_ids = tuple(str(member["layout_region_id"]) for member in members)
+        key = (str(table_id or ""), *member_ids)
+        if key in emitted:
+            return
+        emitted.add(key)
+        boxes = [list(map(float, member["bbox_px"])) for member in members]
+        virtual = dict(members[0])
+        virtual_id = "fragmented:" + "+".join(member_ids)
+        if table_id:
+            virtual_id += f":table:{table_id}"
+        virtual.update(
+            layout_region_id=virtual_id,
+            type="Text",
+            text=combined,
+            bbox_px=_group_bbox(members),
+            width_px=max(box[2] for box in boxes) - min(box[0] for box in boxes),
+            height_px=max(box[3] for box in boxes) - min(box[1] for box in boxes),
+            semantic_source_region_ids=list(member_ids),
+            semantic_reference=reference.__dict__,
+            semantic_target_table_region_id=table_id,
+            semantic_detection_method="orientation_aware_fragmented_identifier",
+        )
+        if orientation and orientation.get("angle_degrees") is not None:
+            virtual["orientation"] = dict(orientation)
+        output.append(virtual)
+
+    # Strong contextual path: an existing Caption and a Table define the lane in
+    # which otherwise incomplete Text fragments can jointly become an identifier.
+    captions = [region for region in page_regions if region.get("type") == "Caption"]
+    scale = max(1.0, (page_width**2 + page_height**2) ** 0.5)
+    for table in tables:
+        tb = list(map(float, table["bbox_px"]))
+        for caption in captions:
+            cb = list(map(float, caption["bbox_px"]))
+            orientation = region_orientation(caption)
+            angle = orientation["angle_degrees"]
+            if angle is None:
+                continue
+            caption_table = local_relation(cb, tb, angle)
+            if caption_table["side"] not in {"before", "after"}:
+                continue
+            local_caption = project_bbox(cb, angle)
+            lane = []
+            for region in text_regions:
+                if region.get("type") not in {"Text", "List"}:
+                    continue
+                rb = list(map(float, region["bbox_px"]))
+                if _intersection_area(rb, tb) > 0:
+                    continue
+                if compatible_orientation(region, caption) is False:
+                    continue
+                region_table = local_relation(rb, tb, angle)
+                if region_table["side"] != caption_table["side"]:
+                    continue
+                local_region = project_bbox(rb, angle)
+                block_overlap = interval_overlap_ratio(
+                    local_region.block_min,
+                    local_region.block_max,
+                    local_caption.block_min,
+                    local_caption.block_max,
+                )
+                inline_overlap = interval_overlap_ratio(
+                    local_region.inline_min,
+                    local_region.inline_max,
+                    local_caption.inline_min,
+                    local_caption.inline_max,
+                )
+                inline_gap = max(
+                    0.0,
+                    max(local_region.inline_min, local_caption.inline_min)
+                    - min(local_region.inline_max, local_caption.inline_max),
+                )
+                block_gap = max(
+                    0.0,
+                    max(local_region.block_min, local_caption.block_min)
+                    - min(local_region.block_max, local_caption.block_max),
+                )
+                # The far end of a multi-box identifier can be several short
+                # tokens away from the description even though every internal
+                # token gap is small. The grammar and bounded path length provide
+                # the stricter safeguard after this intentionally broad search.
+                same_line = block_overlap >= 0.30 and inline_gap / scale <= 0.18
+                adjacent_line = inline_overlap >= 0.30 and block_gap / scale <= 0.025
+                if not (same_line or adjacent_line):
+                    continue
+                lane.append((region, local_region))
+            # Limit combinatorics without using global page order: the closest
+            # local fragments are the only plausible missing caption prefix.
+            lane.sort(
+                key=lambda item: min(
+                    abs(item[1].inline_max - local_caption.inline_min),
+                    abs(local_caption.inline_max - item[1].inline_min),
+                )
+            )
+            lane = lane[:8]
+            for size in range(2, min(4, len(lane)) + 1):
+                for selection in combinations(lane, size):
+                    local_sorted = sorted(
+                        selection, key=lambda item: item[1].inline_min
+                    )
+                    directions = [local_sorted]
+                    # bbox-axis inference gives a baseline axis, not a reading
+                    # direction. Test both directions and let the grammar decide.
+                    if orientation.get("source") == "bbox_axis":
+                        directions.append(list(reversed(local_sorted)))
+                    for ordered_items in directions:
+                        members = [item[0] for item in ordered_items]
+                        member_locals = [item[1] for item in ordered_items]
+                        gaps = [
+                            max(0.0, right.inline_min - left.inline_max) / scale
+                            for left, right in zip(member_locals, member_locals[1:])
+                        ]
+                        if gaps and max(gaps) > 0.025:
+                            continue
+                        parsed = parse_fragmented_table_reference(
+                            [member.get("text") for member in members],
+                            allow_ocr_tolerance=True,
+                        )
+                        if not parsed or any(
+                            _table_reference(member.get("text")) for member in members
+                        ):
+                            continue
+                        reference, combined = parsed
+                        # Contextual reconstruction owns only the identifier. The
+                        # detector-class Caption remains the description anchor.
+                        if combined[reference.end :].strip():
+                            continue
+                        cluster_same_line = any(
+                            interval_overlap_ratio(
+                                item.block_min,
+                                item.block_max,
+                                local_caption.block_min,
+                                local_caption.block_max,
+                            )
+                            >= 0.30
+                            for item in member_locals
+                        )
+                        if (
+                            cluster_same_line
+                            and orientation.get("source") != "bbox_axis"
+                            and max(item.inline_max for item in member_locals)
+                            > local_caption.inline_min + scale * 0.008
+                        ):
+                            continue
+                        emit(
+                            members,
+                            reference,
+                            combined,
+                            table_id=str(table["layout_region_id"]),
+                            orientation=orientation,
+                        )
+
+    # Page-axis fallback supports ordinary horizontal pages and documents without
+    # orientation metadata. It is deliberately bounded but no longer the sole
+    # mechanism used for fragmented identifiers.
     for size in (3, 2):
         for start in range(len(text_regions) - size + 1):
             members = text_regions[start : start + size]
@@ -508,23 +685,41 @@ def _fragmented_identifier_candidates(
             ):
                 continue
             reference, combined = parsed
-            virtual = dict(members[0])
-            virtual.update(
-                layout_region_id="fragmented:"
-                + "+".join(str(m["layout_region_id"]) for m in members),
-                type="Text",
-                text=combined,
-                bbox_px=union_bbox,
-                width_px=max(box[2] for box in boxes) - min(box[0] for box in boxes),
-                height_px=max(box[3] for box in boxes) - min(box[1] for box in boxes),
-                semantic_source_region_ids=[
-                    str(m["layout_region_id"]) for m in members
-                ],
-                semantic_reference=reference.__dict__,
-            )
-            output.append(virtual)
+            if combined[reference.end :].strip():
+                continue
+            emit(members, reference, combined)
             claimed.update(member_ids)
-    return output
+    # Prefer the most complete contextual interpretation when, for example,
+    # ``Table`` + ``S`` is a valid label but ``Table`` + ``S`` + ``3`` is the
+    # actual identifier. This also prevents overlapping virtual candidates from
+    # independently claiming the same physical prefix components.
+    contextual = [
+        item for item in output if item.get("semantic_target_table_region_id")
+    ]
+    contextual_sources = {
+        tuple(item["semantic_source_region_ids"]) for item in contextual
+    }
+    superseded: set[str] = set()
+    for candidate in contextual:
+        candidate_ids = set(candidate["semantic_source_region_ids"])
+        for other in contextual:
+            if candidate is other or candidate.get(
+                "semantic_target_table_region_id"
+            ) != other.get("semantic_target_table_region_id"):
+                continue
+            other_ids = set(other["semantic_source_region_ids"])
+            if candidate_ids < other_ids:
+                superseded.add(str(candidate["layout_region_id"]))
+                break
+    return [
+        item
+        for item in output
+        if str(item["layout_region_id"]) not in superseded
+        and (
+            item.get("semantic_target_table_region_id")
+            or tuple(item["semantic_source_region_ids"]) not in contextual_sources
+        )
+    ]
 
 
 def _caption_edge_has_identifier_neighbor(
@@ -564,14 +759,16 @@ def _retain_one_caption_side(
     tables: list[LayoutRegion],
     page_width: float,
     page_height: float,
+    config: TableContextConfig,
 ) -> list[dict[str, Any]]:
     """Keep one coherent caption lane per table while retaining independent notes.
 
     Rotated tables commonly have a caption on one long edge and notes on the
     opposite edge. Combining detector-class Caption boxes from both sides makes
-    the semantic union cross the table. A leading table identifier is the
-    authoritative side anchor; otherwise the strongest caption edge selects the
-    lane. Source detections on other sides remain untouched and ungrouped.
+    the semantic union cross the table. Score each complete side hypothesis using
+    identifier quality, reconstructed-fragment evidence, detector class, and note
+    semantics; never let one weak lexical parse categorically select a lane.
+    Source detections on other sides remain untouched and ungrouped.
     """
     captions_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for edge in edges:
@@ -580,26 +777,96 @@ def _retain_one_caption_side(
 
     regions_by_id = {str(region["layout_region_id"]): region for region in page_regions}
     tables_by_id = {str(table["layout_region_id"]): table for table in tables}
-    selected_side: dict[str, str] = {}
+    selected_side: dict[str, str | None] = {}
     selected_orientation_anchor: dict[str, LayoutRegion] = {}
     for table_id, caption_edges in captions_by_table.items():
-        anchors = [edge for edge in caption_edges if edge.get("printed_label")]
-        neighboring_anchors = [
-            edge
-            for edge in caption_edges
-            if _caption_edge_has_identifier_neighbor(
-                edge,
-                regions_by_id,
-                page_regions,
-                tables_by_id[table_id],
-                page_width,
-                page_height,
+        by_side: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for edge in caption_edges:
+            by_side[str(edge["direction"])].append(edge)
+        hypotheses: list[dict[str, Any]] = []
+        for side, side_edges in by_side.items():
+            identifier_edges = [
+                edge for edge in side_edges if edge.get("printed_label")
+            ]
+            identifier_quality = max(
+                (
+                    float(
+                        (edge.get("semantic_reference_quality") or {}).get("score", 1.0)
+                    )
+                    for edge in identifier_edges
+                ),
+                default=0.0,
             )
+            reconstructed = any(
+                regions_by_id[str(edge["region_id"])].get("semantic_detection_method")
+                == "orientation_aware_fragmented_identifier"
+                for edge in identifier_edges
+            )
+            detector_captions = sum(
+                regions_by_id[str(edge["region_id"])].get("type") == "Caption"
+                for edge in side_edges
+            )
+            note_like = sum(
+                bool(
+                    _TABLE_NOTE_TEXT_RE.match(
+                        str(regions_by_id[str(edge["region_id"])].get("text") or "")
+                    )
+                )
+                for edge in side_edges
+            )
+            neighboring_identifier = any(
+                _caption_edge_has_identifier_neighbor(
+                    edge,
+                    regions_by_id,
+                    page_regions,
+                    tables_by_id[table_id],
+                    page_width,
+                    page_height,
+                )
+                for edge in side_edges
+            )
+            components = {
+                "strongest_edge": max(float(edge["score"]) for edge in side_edges),
+                "identifier_quality": 1.8 * identifier_quality,
+                "reconstructed_identifier": 1.6 if reconstructed else 0.0,
+                "neighboring_identifier": 0.8 if neighboring_identifier else 0.0,
+                "detector_caption": min(1.0, 0.5 * detector_captions),
+                "note_penalty": -2.5 * note_like,
+            }
+            hypotheses.append(
+                {
+                    "side": side,
+                    "score": sum(components.values()),
+                    "components": components,
+                    "edges": side_edges,
+                    "anchor": max(
+                        identifier_edges or side_edges,
+                        key=lambda edge: (edge["score"], edge["region_id"]),
+                    ),
+                }
+            )
+        hypotheses.sort(key=lambda item: (-item["score"], item["side"]))
+        winner = hypotheses[0]
+        ambiguous = (
+            len(hypotheses) > 1
+            and winner["score"] - hypotheses[1]["score"]
+            < config.fragment_ambiguity_margin
+        )
+        selected_side[table_id] = None if ambiguous else str(winner["side"])
+        if ambiguous:
+            continue
+        for hypothesis in hypotheses:
+            for edge in hypothesis["edges"]:
+                edge.setdefault("features", {})["caption_side_hypothesis"] = {
+                    "side": hypothesis["side"],
+                    "score": round(hypothesis["score"], 4),
+                    "components": hypothesis["components"],
+                    "selected": hypothesis is winner,
+                }
+        anchor_edge = winner["anchor"]
+        selected_orientation_anchor[table_id] = regions_by_id[
+            str(anchor_edge["region_id"])
         ]
-        pool = anchors or neighboring_anchors or caption_edges
-        winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
-        selected_side[table_id] = str(winner["direction"])
-        selected_orientation_anchor[table_id] = regions_by_id[str(winner["region_id"])]
 
     return [
         edge
@@ -631,6 +898,9 @@ def _reference_fragment_edge(
         candidate.get("text"), allow_ocr_tolerance=True
     )
     if not reference:
+        return None
+    reference_quality = caption_reference_quality(candidate.get("text"), reference)
+    if not reference_quality["authoritative"]:
         return None
     negative_reasons = body_reference_evidence(candidate.get("text"))
     if negative_reasons:
@@ -711,6 +981,7 @@ def _reference_fragment_edge(
         "direction": caption_side,
         "printed_label": reference.label,
         "semantic_reference": reference.__dict__,
+        "semantic_reference_quality": reference_quality,
         "features": {
             "rule": (
                 "same_side_table_reference_next_to_caption"
@@ -876,6 +1147,9 @@ def associate_table_context(
             for candidate in page_regions:
                 if candidate is table:
                     continue
+                target_table = candidate.get("semantic_target_table_region_id")
+                if target_table and str(table["layout_region_id"]) != str(target_table):
+                    continue
                 for role in ("caption", "note"):
                     metrics["candidate_role_pairs"] += 1
                     if role == "caption" and not (
@@ -903,7 +1177,9 @@ def associate_table_context(
                         edges.append(edge)
                         metrics["scored_edges"] += 1
 
-        edges = _retain_one_caption_side(edges, page_regions, tables, width, height)
+        edges = _retain_one_caption_side(
+            edges, page_regions, tables, width, height, config
+        )
 
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:

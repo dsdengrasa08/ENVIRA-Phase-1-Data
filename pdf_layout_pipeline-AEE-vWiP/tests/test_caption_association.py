@@ -4,7 +4,6 @@ from envira_pdf_layout.caption_association import (
 )
 from envira_pdf_layout.config import CaptionAssociationConfig
 
-
 PAGES = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
 
 
@@ -88,4 +87,20 @@ def test_metadata_heading_caption_is_not_assigned_to_an_asset():
         [region("figure", "Figure", [100, 100, 400, 300]), heading], PAGES
     )
 
+    assert relationships == []
+
+
+def test_note_derived_table_letter_is_not_assigned_as_caption():
+    relationships = associate_captions(
+        [
+            region("table", "Table", [100, 100, 700, 500]),
+            region(
+                "note",
+                "Caption",
+                [100, 505, 700, 540],
+                "Table a See Table 2 for treatment codes.",
+            ),
+        ],
+        PAGES,
+    )
     assert relationships == []
