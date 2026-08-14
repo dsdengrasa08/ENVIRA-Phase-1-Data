@@ -35,6 +35,11 @@ _TABLE_MENTION_RE = re.compile(
     r"[IVXLCDM]+|[A-Z]))\b",
     re.IGNORECASE,
 )
+_NOTE_CONTINUATION_RE = re.compile(
+    r"^(?:see\s+table\b|means?\s+(?:within|followed)\b|values?\s+in\s+"
+    r"parentheses\b|notes?\s*:|sources?\s*:)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,44 @@ class SemanticCaptionReference:
     position: str
     confidence: float
     ocr_tolerant: bool = False
+
+
+def caption_reference_quality(
+    value: Any, reference: SemanticCaptionReference | None
+) -> dict[str, Any]:
+    """Grade whether a parsed identifier is authoritative caption evidence.
+
+    Parsing remains deliberately permissive so legitimate ``Table A`` conventions
+    are supported. Ownership callers need stronger contextual evidence: rotated
+    extraction can concatenate ``Table`` with a lowercase footnote marker and a
+    note such as ``See Table 2 for treatment codes``.
+    """
+    if reference is None:
+        return {"authoritative": False, "score": 0.0, "reasons": ["no_reference"]}
+    text = normalize_caption_text(value)
+    suffix = text[reference.end :].lstrip(" .:-")
+    reasons: list[str] = []
+    score = float(reference.confidence)
+    single_lowercase = len(reference.number) == 1 and reference.number.islower()
+    if single_lowercase:
+        reasons.append("lowercase_single_letter_identifier")
+        score -= 0.35
+    if suffix and _NOTE_CONTINUATION_RE.match(suffix):
+        reasons.append("table_note_continuation")
+        score -= 0.75
+    trailing_mention = _TABLE_MENTION_RE.search(suffix) if suffix else None
+    if trailing_mention and trailing_mention.start() <= 8:
+        reasons.append("immediate_trailing_table_reference")
+        score -= 0.55
+    authoritative = score >= 0.55 and not (
+        single_lowercase and "table_note_continuation" in reasons
+    )
+    return {
+        "authoritative": authoritative,
+        "score": round(max(0.0, min(1.0, score)), 4),
+        "reasons": reasons,
+        "suffix": suffix,
+    }
 
 
 def normalize_caption_text(value: Any) -> str:

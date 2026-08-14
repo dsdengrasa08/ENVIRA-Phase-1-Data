@@ -396,6 +396,50 @@ def test_rotated_270_fragmented_identifier_preserves_reading_direction():
     assert caption["text"] == "Table 12 Outcomes by treatment."
 
 
+def test_rotated_fragmented_identifier_beats_opposite_table_note_caption():
+    from envira_pdf_layout.caption_overlap import build_caption_groups
+
+    regions = [
+        region("word", "Text", [150, 100, 190, 170], "Table", 1, orientation=90),
+        region("number", "Text", [150, 175, 190, 195], "5", 2, orientation=90),
+        region(
+            "description",
+            "Caption",
+            [150, 200, 190, 700],
+            "N2O emissions by treatment.",
+            3,
+            orientation=90,
+        ),
+        region("table", "Table", [200, 100, 700, 800], order=4),
+        region(
+            "false-anchor-note",
+            "Caption",
+            [710, 100, 750, 800],
+            "Table a See Table 2 for treatment codes.",
+            5,
+            orientation=90,
+        ),
+        region(
+            "note",
+            "Caption",
+            [755, 100, 795, 800],
+            "Values in parentheses represent standard errors.",
+            6,
+            orientation=90,
+        ),
+    ]
+
+    logical = associate(regions)
+    group = logical[0]
+    assert set(group["identifier_region_ids"]) == {"word", "number"}
+    assert group["caption_region_ids"] == ["description"]
+    assert "false-anchor-note" not in group["caption_region_ids"]
+    assert "note" not in group["caption_region_ids"]
+    caption = build_caption_groups(regions, logical, [], PAGES)[0]
+    assert caption["text"] == "Table 5 N2O emissions by treatment."
+    assert caption["bbox_spans_table"] is False
+
+
 def test_fragmented_identifier_variants_join_a_detector_caption():
     variants = [
         (["TABLE", "IV"], "TABLE IV"),

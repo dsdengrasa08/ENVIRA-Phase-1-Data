@@ -19,6 +19,7 @@ from .orientation import (
 )
 from .semantic_caption import (
     body_reference_evidence,
+    caption_reference_quality,
     find_table_reference_mention,
     parse_fragmented_table_reference,
     parse_semantic_caption_reference,
@@ -27,6 +28,11 @@ from .semantic_caption import (
 _NOTE_RE = re.compile(
     r"^\s*(?:notes?|sources?)\s*:|^\s*(?:[*†‡]|[a-z])(?:[.)]|\s{1,3})\s+|"
     r"\b[pP]\s*[<=>]\s*\.?\d+",
+    re.IGNORECASE,
+)
+_TABLE_NOTE_TEXT_RE = re.compile(
+    r"^(?:[a-z*†‡][.)]?\s+)?(?:see\s+table\b|means?\s+(?:within|followed)\b|"
+    r"values?\s+in\s+parentheses\b|treatment\s+codes?\b)",
     re.IGNORECASE,
 )
 _BODY_SENTENCE_RE = re.compile(r"^[A-Z][^.!?]{35,}[.!?](?:\s|$)")
@@ -185,6 +191,9 @@ def _score_edge(
     if role == "caption" and other_asset_kind:
         return None
     label_match = _table_reference(text, tolerant=True)
+    reference_quality = caption_reference_quality(text, label_match)
+    if role == "caption" and label_match and not reference_quality["authoritative"]:
+        return None
     negative_reasons = [] if label_match else body_reference_evidence(text)
     note_match = _NOTE_RE.search(text)
     style = candidate.get("typography") or {}
@@ -250,6 +259,7 @@ def _score_edge(
             label_match and text[label_match.end :].strip()
         ),
         "semantic_reference": label_match.__dict__ if label_match else None,
+        "semantic_reference_quality": reference_quality if label_match else None,
         "negative_reasons": negative_reasons,
     }
 
@@ -749,14 +759,16 @@ def _retain_one_caption_side(
     tables: list[LayoutRegion],
     page_width: float,
     page_height: float,
+    config: TableContextConfig,
 ) -> list[dict[str, Any]]:
     """Keep one coherent caption lane per table while retaining independent notes.
 
     Rotated tables commonly have a caption on one long edge and notes on the
     opposite edge. Combining detector-class Caption boxes from both sides makes
-    the semantic union cross the table. A leading table identifier is the
-    authoritative side anchor; otherwise the strongest caption edge selects the
-    lane. Source detections on other sides remain untouched and ungrouped.
+    the semantic union cross the table. Score each complete side hypothesis using
+    identifier quality, reconstructed-fragment evidence, detector class, and note
+    semantics; never let one weak lexical parse categorically select a lane.
+    Source detections on other sides remain untouched and ungrouped.
     """
     captions_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for edge in edges:
@@ -765,26 +777,96 @@ def _retain_one_caption_side(
 
     regions_by_id = {str(region["layout_region_id"]): region for region in page_regions}
     tables_by_id = {str(table["layout_region_id"]): table for table in tables}
-    selected_side: dict[str, str] = {}
+    selected_side: dict[str, str | None] = {}
     selected_orientation_anchor: dict[str, LayoutRegion] = {}
     for table_id, caption_edges in captions_by_table.items():
-        anchors = [edge for edge in caption_edges if edge.get("printed_label")]
-        neighboring_anchors = [
-            edge
-            for edge in caption_edges
-            if _caption_edge_has_identifier_neighbor(
-                edge,
-                regions_by_id,
-                page_regions,
-                tables_by_id[table_id],
-                page_width,
-                page_height,
+        by_side: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for edge in caption_edges:
+            by_side[str(edge["direction"])].append(edge)
+        hypotheses: list[dict[str, Any]] = []
+        for side, side_edges in by_side.items():
+            identifier_edges = [
+                edge for edge in side_edges if edge.get("printed_label")
+            ]
+            identifier_quality = max(
+                (
+                    float(
+                        (edge.get("semantic_reference_quality") or {}).get("score", 1.0)
+                    )
+                    for edge in identifier_edges
+                ),
+                default=0.0,
             )
+            reconstructed = any(
+                regions_by_id[str(edge["region_id"])].get("semantic_detection_method")
+                == "orientation_aware_fragmented_identifier"
+                for edge in identifier_edges
+            )
+            detector_captions = sum(
+                regions_by_id[str(edge["region_id"])].get("type") == "Caption"
+                for edge in side_edges
+            )
+            note_like = sum(
+                bool(
+                    _TABLE_NOTE_TEXT_RE.match(
+                        str(regions_by_id[str(edge["region_id"])].get("text") or "")
+                    )
+                )
+                for edge in side_edges
+            )
+            neighboring_identifier = any(
+                _caption_edge_has_identifier_neighbor(
+                    edge,
+                    regions_by_id,
+                    page_regions,
+                    tables_by_id[table_id],
+                    page_width,
+                    page_height,
+                )
+                for edge in side_edges
+            )
+            components = {
+                "strongest_edge": max(float(edge["score"]) for edge in side_edges),
+                "identifier_quality": 1.8 * identifier_quality,
+                "reconstructed_identifier": 1.6 if reconstructed else 0.0,
+                "neighboring_identifier": 0.8 if neighboring_identifier else 0.0,
+                "detector_caption": min(1.0, 0.5 * detector_captions),
+                "note_penalty": -2.5 * note_like,
+            }
+            hypotheses.append(
+                {
+                    "side": side,
+                    "score": sum(components.values()),
+                    "components": components,
+                    "edges": side_edges,
+                    "anchor": max(
+                        identifier_edges or side_edges,
+                        key=lambda edge: (edge["score"], edge["region_id"]),
+                    ),
+                }
+            )
+        hypotheses.sort(key=lambda item: (-item["score"], item["side"]))
+        winner = hypotheses[0]
+        ambiguous = (
+            len(hypotheses) > 1
+            and winner["score"] - hypotheses[1]["score"]
+            < config.fragment_ambiguity_margin
+        )
+        selected_side[table_id] = None if ambiguous else str(winner["side"])
+        if ambiguous:
+            continue
+        for hypothesis in hypotheses:
+            for edge in hypothesis["edges"]:
+                edge.setdefault("features", {})["caption_side_hypothesis"] = {
+                    "side": hypothesis["side"],
+                    "score": round(hypothesis["score"], 4),
+                    "components": hypothesis["components"],
+                    "selected": hypothesis is winner,
+                }
+        anchor_edge = winner["anchor"]
+        selected_orientation_anchor[table_id] = regions_by_id[
+            str(anchor_edge["region_id"])
         ]
-        pool = anchors or neighboring_anchors or caption_edges
-        winner = max(pool, key=lambda edge: (edge["score"], edge["region_id"]))
-        selected_side[table_id] = str(winner["direction"])
-        selected_orientation_anchor[table_id] = regions_by_id[str(winner["region_id"])]
 
     return [
         edge
@@ -816,6 +898,9 @@ def _reference_fragment_edge(
         candidate.get("text"), allow_ocr_tolerance=True
     )
     if not reference:
+        return None
+    reference_quality = caption_reference_quality(candidate.get("text"), reference)
+    if not reference_quality["authoritative"]:
         return None
     negative_reasons = body_reference_evidence(candidate.get("text"))
     if negative_reasons:
@@ -896,6 +981,7 @@ def _reference_fragment_edge(
         "direction": caption_side,
         "printed_label": reference.label,
         "semantic_reference": reference.__dict__,
+        "semantic_reference_quality": reference_quality,
         "features": {
             "rule": (
                 "same_side_table_reference_next_to_caption"
@@ -1091,7 +1177,9 @@ def associate_table_context(
                         edges.append(edge)
                         metrics["scored_edges"] += 1
 
-        edges = _retain_one_caption_side(edges, page_regions, tables, width, height)
+        edges = _retain_one_caption_side(
+            edges, page_regions, tables, width, height, config
+        )
 
         candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:

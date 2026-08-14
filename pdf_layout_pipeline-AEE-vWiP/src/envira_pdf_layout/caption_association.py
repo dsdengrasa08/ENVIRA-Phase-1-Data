@@ -16,6 +16,7 @@ from .orientation import local_relation, region_orientation
 from .semantic_caption import (
     SemanticCaptionReference as CaptionReference,
     body_reference_evidence,
+    caption_reference_quality,
     parse_semantic_caption_reference,
 )
 
@@ -119,6 +120,13 @@ def associate_captions(
         for caption in candidates:
             reference = references[str(caption["layout_region_id"])]
             if reference and body_reference_evidence(caption.get("text")):
+                continue
+            if (
+                reference
+                and not caption_reference_quality(
+                    caption.get("text") or caption.get("orig"), reference
+                )["authoritative"]
+            ):
                 continue
             expected = _EXPECTED_PARENT.get(reference.kind) if reference else None
             cb = list(map(float, caption["bbox_px"]))
