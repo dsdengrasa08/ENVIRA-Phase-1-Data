@@ -112,6 +112,27 @@ def test_page_spanning_figure_is_not_trusted_to_own_contained_text():
     assert result.decisions[0]["reason"] == "figure_exceeds_trusted_page_area"
 
 
+def test_rotated_edge_label_flows_from_overlap_into_nested_figure_emission():
+    regions = [
+        region("axis", "Text", [105, 50, 120, 275], text="Seasonal emission"),
+        region("figure", "Figure", [100, 120, 850, 530]),
+    ]
+    pages = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
+    observations = resolve_layout_overlaps(
+        regions, pages, containment=ContainmentConfig()
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+
+    assert [row["layout_region_id"] for row in result.top_level_regions] == ["figure"]
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["axis"]
+    assert result.nested_regions[0]["emission_policy"] == "emit_as_nested_child"
+
+
 def test_nested_container_and_multiple_parents_are_not_forced_into_hierarchy():
     regions = [
         region("figure", "Figure", [0, 0, 500, 500]),

@@ -109,6 +109,33 @@ def test_materially_protruding_text_is_not_treated_as_contained():
     assert result.relationships[0]["kind"] == "CLASS_CONFLICT"
 
 
+def test_rotated_axis_label_crossing_one_figure_edge_is_containment_candidate():
+    result = resolve_layout_overlaps(
+        [
+            region("axis", "Text", [105, 50, 120, 275], "Seasonal emission"),
+            region("figure", "Figure", [100, 120, 850, 530]),
+        ],
+        PAGES,
+    )
+    relation = result.relationships[0]
+    assert relation["kind"] == "CONTAINMENT_CANDIDATE"
+    assert relation["reason"] == "figure_edge_internal_text_observed"
+    assert relation["candidate_parent_region_id"] == "figure"
+    assert relation["candidate_child_region_id"] == "axis"
+    assert relation["features"]["a_containment"] < 0.72
+
+
+def test_horizontal_prose_crossing_figure_edge_is_not_axis_label_containment():
+    result = resolve_layout_overlaps(
+        [
+            region("figure", "Figure", [100, 120, 850, 530]),
+            region("prose", "Text", [700, 110, 920, 150], "body prose continues"),
+        ],
+        PAGES,
+    )
+    assert result.relationships[0]["kind"] == "CLASS_CONFLICT"
+
+
 def test_non_container_containment_remains_observational_for_hierarchy_policy():
     result = resolve_layout_overlaps(
         [
