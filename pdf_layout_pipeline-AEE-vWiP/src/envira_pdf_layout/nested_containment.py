@@ -22,6 +22,8 @@ CONTAINMENT_POLICIES = {
             "formula",
             "code",
             "caption_identifier",
+            "internal_plot_title",
+            "legend_list",
         },
         "invalid": {"body_paragraph", "section_heading", "table", "figure"},
     },
@@ -59,6 +61,12 @@ def containment_features(child: LayoutRegion, parent: LayoutRegion) -> dict[str,
     parent_bbox = tuple(map(float, parent["bbox_px"]))
     child_area, parent_area = bbox_area(child_bbox), bbox_area(parent_bbox)
     intersection = intersection_area(child_bbox, parent_bbox)
+    original_parent_bbox = parent.get("figure_completion_original_bbox_px")
+    original_parent_coverage = None
+    if original_parent_bbox:
+        original_parent_coverage = intersection_area(
+            child_bbox, tuple(map(float, original_parent_bbox))
+        ) / max(child_area, 1.0)
     child_center = (
         (child_bbox[0] + child_bbox[2]) / 2,
         (child_bbox[1] + child_bbox[3]) / 2,
@@ -79,6 +87,7 @@ def containment_features(child: LayoutRegion, parent: LayoutRegion) -> dict[str,
             parent.get("figure_completion_original_bbox_px")
             or parent.get("figure_completion_completed_from_region_ids")
         ),
+        "child_coverage_in_original_parent": original_parent_coverage,
         "source_bbox": list(child.get("source_bbox_px") or child["bbox_px"]),
         "parent_source_bbox": list(parent.get("source_bbox_px") or parent["bbox_px"]),
         "text_relation": _text_relation(child, parent),
@@ -118,6 +127,26 @@ def infer_child_role(
         f"parent_type:{parent_type}",
         f"text_chars:{len(text)}",
     ]
+    semantic_hint = str(child.get("semantic_role") or "").casefold()
+    if parent_type == "Figure" and semantic_hint in {
+        "axis_label",
+        "legend",
+        "annotation",
+        "panel_label",
+        "figure_internal_text",
+        "plot_title",
+    }:
+        evidence.append(f"semantic_hint:{semantic_hint}")
+        return (
+            "panel_label"
+            if semantic_hint == "panel_label"
+            else "internal_plot_title"
+            if semantic_hint == "plot_title"
+            else "legend_list"
+            if semantic_hint == "legend" and child_type == "List"
+            else "figure_internal_text",
+            evidence,
+        )
     if child_type in {"Formula", "Equation"}:
         return "formula", evidence
     if child_type == "Code":
@@ -170,12 +199,14 @@ def analyze_nested_containment(
     config: ContainmentConfig | None = None,
     index: RegionIndex | None = None,
     metrics: dict[str, int] | None = None,
+    protected_child_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate page-local proposals without removing or mutating any region."""
     config = config or ContainmentConfig()
     index = index or RegionIndex.build(regions, [])
     by_id = index.by_id
     metrics = metrics if metrics is not None else {}
+    protected_child_ids = protected_child_ids or set()
     metrics.update(observations_examined=0, pairs_scored=0, proposals_emitted=0)
     if observations is not None:
         proposals = []
@@ -188,6 +219,8 @@ def analyze_nested_containment(
             if parent_id not in by_id or child_id not in by_id:
                 continue
             parent, child = by_id[parent_id], by_id[child_id]
+            if child_id in protected_child_ids:
+                continue
             observed = relation.get("features")
             features = containment_features(child, parent)
             if observed:
@@ -208,6 +241,9 @@ def analyze_nested_containment(
                         "text_relation": observed.get(
                             "text_relation", features["text_relation"]
                         ),
+                        "parent_page_area_ratio": observed[
+                            "b_page_area_ratio" if child_is_left else "a_page_area_ratio"
+                        ],
                     }
                 )
             else:
@@ -220,6 +256,8 @@ def analyze_nested_containment(
         parents = page_regions
         for child in page_regions:
             child_id = str(child["layout_region_id"])
+            if child_id in protected_child_ids:
+                continue
             for parent in parents:
                 metrics["observations_examined"] += 1
                 parent_id = str(parent["layout_region_id"])
@@ -271,6 +309,22 @@ def _classify(
     parent_type, child_type = proposal["parent_type"], proposal["child_type"]
     features = proposal["features"]
     role, role_evidence = infer_child_role(child, parent, config)
+    if (
+        parent_type == "Figure"
+        and child_type in {"Text", "Footnote", "Unknown"}
+        and features["child_center_inside_parent"]
+        and features["child_coverage"] > 0
+    ):
+        # Figure ownership is a document-emission decision, not a detector-score
+        # competition. Even long OCR fragments, large duplicate text envelopes, or
+        # labels captured by a completed Figure are nested when their center belongs
+        # to the Figure. Captions remain protected by semantic caption association.
+        return (
+            "NESTED_CHILD",
+            "figure_owns_centered_text",
+            role,
+            role_evidence + ["semantic_ownership:figure_center"],
+        )
     child_parent_ratio = features["child_area"] / max(features["parent_area"], 1.0)
     if child_parent_ratio > config.max_child_parent_area_ratio:
         return (
@@ -316,9 +370,24 @@ def _classify(
             )
         return "INVALID_OCCLUSION", "parent_not_container_capable", role, role_evidence
     if features["parent_figure_completed"] and child_type in TEXT_TYPES:
+        original_coverage = features.get("child_coverage_in_original_parent")
+        if original_coverage is not None and original_coverage >= config.strong_child_coverage:
+            pass
+        else:
+            return (
+                "AMBIGUOUS_CONTAINMENT",
+                "expanded_asset_captures_text",
+                role,
+                role_evidence,
+            )
+    if (
+        parent_type == "Figure"
+        and features.get("parent_page_area_ratio", 0.0)
+        > config.trusted_figure_max_page_area_ratio
+    ):
         return (
             "AMBIGUOUS_CONTAINMENT",
-            "expanded_asset_captures_text",
+            "figure_exceeds_trusted_page_area",
             role,
             role_evidence,
         )
@@ -355,10 +424,12 @@ def resolve_nested_hierarchy(
     regions: list[LayoutRegion],
     proposals: list[dict[str, Any]] | None = None,
     config: ContainmentConfig | None = None,
+    protected_child_ids: set[str] | None = None,
 ) -> HierarchyResult:
     """Resolve proposals once, retaining ambiguous candidates at top level."""
     working = deepcopy(regions)
     config = config or ContainmentConfig()
+    protected_child_ids = protected_child_ids or set()
     for region in working:
         for key in (
             "nested_parent_region_ids",
@@ -383,6 +454,16 @@ def resolve_nested_hierarchy(
         if parent_id not in by_id or child_id not in by_id:
             decisions.append(
                 {**proposal, "action": "reject", "reason": "missing_region_reference"}
+            )
+            continue
+        if child_id in protected_child_ids:
+            decisions.append(
+                {
+                    **proposal,
+                    "action": "retain_top_level",
+                    "kind": "PROTECTED_SEMANTIC_CHILD",
+                    "reason": "caption_association_protects_document_level_sibling",
+                }
             )
             continue
         if by_id[parent_id]["page_number"] != by_id[child_id]["page_number"]:

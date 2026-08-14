@@ -47,5 +47,13 @@ resolver infers roles such as panel label, figure-internal text, table-cell text
 table note, form field, list item, body paragraph, and caption identifier, then applies
 the declarative matrix in `nested_containment.py`. Text-to-text containment is routed
 to duplicate/identifier-fragment/ambiguous-occlusion outcomes and never establishes
-container hierarchy. One shared `containment` configuration section supplies geometry
-and role thresholds.
+container hierarchy. Figure children may additionally be recognized as internal plot
+titles or legend lists, while explicit upstream semantic hints can preserve long axis,
+legend, or annotation text as Figure-internal content rather than relying on text length
+alone. One shared `containment` configuration section supplies strong and bounded-near
+geometry, Figure trust, and role thresholds. Associated external captions are protected
+as document-level siblings before containment is resolved.
+Generic Text, Footnote, and Unknown regions with a positive Figure intersection and
+their center inside that Figure follow a direct semantic-ownership rule. This ensures
+embedded OCR fragments do not survive as independent document blocks; detector score
+and OCR length do not override Figure ownership. Caption association remains exempt.

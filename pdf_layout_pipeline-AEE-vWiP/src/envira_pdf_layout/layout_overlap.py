@@ -115,6 +115,8 @@ def overlap_features(
         "area_ratio": min(area_a, area_b) / max(area_a, area_b)
         if max(area_a, area_b)
         else 0.0,
+        "a_page_area_ratio": area_a / (width * height) if width * height else 0.0,
+        "b_page_area_ratio": area_b / (width * height) if width * height else 0.0,
         "a_center_inside_b": bb[0] <= ac[0] <= bb[2] and bb[1] <= ac[1] <= bb[3],
         "b_center_inside_a": ab[0] <= bc[0] <= ab[2] and ab[1] <= bc[1] <= ab[3],
         "a_token_coverage": len(sa & sb) / len(sa) if sa else 0.0,
@@ -129,6 +131,18 @@ def overlap_features(
             abs(ab[2] - bb[2]) / width,
             abs(ab[1] - bb[1]) / height,
             abs(ab[3] - bb[3]) / height,
+        ),
+        "a_protrusion_page_ratio": max(
+            max(0.0, bb[0] - ab[0]) / width,
+            max(0.0, ab[2] - bb[2]) / width,
+            max(0.0, bb[1] - ab[1]) / height,
+            max(0.0, ab[3] - bb[3]) / height,
+        ),
+        "b_protrusion_page_ratio": max(
+            max(0.0, ab[0] - bb[0]) / width,
+            max(0.0, bb[2] - ab[2]) / width,
+            max(0.0, ab[1] - bb[1]) / height,
+            max(0.0, bb[3] - ab[3]) / height,
         ),
         "horizontal_gap_page_ratio": max(0.0, max(ab[0], bb[0]) - min(ab[2], bb[2]))
         / width,
@@ -176,6 +190,12 @@ def _classify(
     config: OverlapResolutionConfig,
     containment: ContainmentConfig,
 ) -> tuple[str, str, str]:
+    if _figure_center_owned_text(a, b, f):
+        return (
+            "CONTAINMENT_CANDIDATE",
+            "figure_center_owned_text_observed",
+            "observe",
+        )
     duplicate_geometry = (
         f["iou"] >= config.duplicate_iou
         and f["area_ratio"] >= config.duplicate_area_ratio
@@ -196,9 +216,21 @@ def _classify(
         f["b_containment"] >= containment.center_child_coverage
         and f["b_center_inside_a"]
     )
+    tolerant_near_containment = (
+        f["a_containment"] >= containment.near_child_coverage
+        and f["a_center_inside_b"]
+        and f["a_protrusion_page_ratio"]
+        <= containment.near_max_edge_protrusion_page_ratio
+    ) or (
+        f["b_containment"] >= containment.near_child_coverage
+        and f["b_center_inside_a"]
+        and f["b_protrusion_page_ratio"]
+        <= containment.near_max_edge_protrusion_page_ratio
+    )
     if (
         f["intersection_over_smaller"] >= containment.strong_child_coverage
         or center_containment
+        or tolerant_near_containment
     ):
         return "CONTAINMENT_CANDIDATE", "directional_containment_observed", "observe"
     if f["intersection_area"] > 0:
@@ -225,6 +257,29 @@ def _classify(
     if text_like and aligned and near and f["text_relation"] == "different":
         return "FRAGMENT_CANDIDATE", "aligned_nearby_unique_text", "retain"
     return "INDEPENDENT", "no_material_relationship", "retain"
+
+
+def _figure_center_owned_text(
+    a: LayoutRegion, b: LayoutRegion, features: dict[str, Any]
+) -> bool:
+    """Treat generic Text centered in a Figure as Figure-owned content.
+
+    This is intentionally semantic rather than score-based: axis labels, legends,
+    annotations, and OCR fragments remain part of the Figure even when an imperfect
+    Figure edge yields low child coverage. Captions are excluded and handled by the
+    caption-association safeguard.
+    """
+    return bool(
+        features["intersection_area"] > 0
+        and (
+            b.get("type") == "Figure"
+            and a.get("type") in {"Text", "Footnote", "Unknown"}
+            and features["a_center_inside_b"]
+            or a.get("type") == "Figure"
+            and b.get("type") in {"Text", "Footnote", "Unknown"}
+            and features["b_center_inside_a"]
+        )
+    )
 
 
 @dataclass
