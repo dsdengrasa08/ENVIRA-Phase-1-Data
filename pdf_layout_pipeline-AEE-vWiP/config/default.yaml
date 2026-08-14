@@ -131,6 +131,17 @@ overlap_resolution:
   formula_boundary_min_retained_height_ratio: 0.45
   cross_class_min_survivor_score: 0.80
   cross_class_score_margin: 0.20
+equation_crops:
+  # Downstream crop margin only; physical and reading-order geometry is unchanged.
+  enabled: true
+  horizontal_margin_height_ratio: 0.35
+  vertical_margin_height_ratio: 0.18
+  minimum_clearance_height_ratio: 0.12
+  maximum_margin_page_ratio: 0.012
+  neighbor_corridor_overlap_ratio: 0.20
+  equation_number_max_gap_page_ratio: 0.20
+  ink_threshold: 235
+  minimum_ink_pixels: 3
 containment:
   strong_child_coverage: 0.92
   center_child_coverage: 0.72
