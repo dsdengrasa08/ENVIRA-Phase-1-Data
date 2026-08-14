@@ -153,6 +153,62 @@ def test_near_identical_text_envelope_is_nested_under_figure_not_score_competed(
     assert [row["layout_region_id"] for row in result.nested_regions] == ["text"]
 
 
+def test_text_already_in_original_figure_can_remain_an_internal_child():
+    result = resolve_nested_hierarchy(
+        [
+            region(
+                "figure",
+                "Figure",
+                [0, 0, 500, 500],
+                figure_completion_original_bbox_px=[0, 0, 200, 200],
+            ),
+            region("label", "Text", [20, 20, 80, 40], text="axis"),
+        ]
+    )
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["label"]
+
+
+def test_page_spanning_figure_is_not_trusted_to_own_contained_text():
+    regions = [
+        region("figure", "Figure", [0, 0, 900, 900]),
+        region("label", "Text", [20, 20, 80, 40], text="axis"),
+    ]
+    observations = resolve_layout_overlaps(
+        regions,
+        [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}],
+        containment=ContainmentConfig(),
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+    assert result.nested_regions == []
+    assert result.decisions[0]["reason"] == "figure_exceeds_trusted_page_area"
+
+
+def test_rotated_edge_label_flows_from_overlap_into_nested_figure_emission():
+    regions = [
+        region("axis", "Text", [105, 50, 120, 275], text="Seasonal emission"),
+        region("figure", "Figure", [100, 120, 850, 530]),
+    ]
+    pages = [{"page_number": 1, "image_width_px": 1000, "image_height_px": 1000}]
+    observations = resolve_layout_overlaps(
+        regions, pages, containment=ContainmentConfig()
+    )
+    proposals = analyze_nested_containment(
+        observations.regions, observations.relationships, config=ContainmentConfig()
+    )
+    result = resolve_nested_hierarchy(
+        observations.regions, proposals, ContainmentConfig()
+    )
+
+    assert [row["layout_region_id"] for row in result.top_level_regions] == ["figure"]
+    assert [row["layout_region_id"] for row in result.nested_regions] == ["axis"]
+    assert result.nested_regions[0]["emission_policy"] == "emit_as_nested_child"
+
+
 def test_nested_container_and_multiple_parents_are_not_forced_into_hierarchy():
     regions = [
         region("figure", "Figure", [0, 0, 500, 500]),
