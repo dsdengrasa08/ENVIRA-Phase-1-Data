@@ -172,6 +172,19 @@ class FigureFilterConfig:
     decomposition_max_foreground_bridge_ratio: float = 0.08
     decomposition_min_assignment_margin: float = 0.08
     decomposition_padding_page_ratio: float = 0.002
+    refine_boundaries: bool = True
+    refinement_ink_threshold: int = 246
+    refinement_min_component_area_ratio: float = 0.00005
+    refinement_min_conflict_smaller_ratio: float = 0.08
+    refinement_min_penetration_page_ratio: float = 0.004
+    refinement_max_neighbor_gap_page_ratio: float = 0.002
+    refinement_min_cross_axis_overlap_ratio: float = 0.25
+    refinement_max_valley_density: float = 0.015
+    refinement_min_valley_page_ratio: float = 0.003
+    refinement_max_removed_ink_ratio: float = 0.015
+    refinement_min_added_ink_ratio: float = 0.002
+    refinement_max_edge_expansion_page_ratio: float = 0.08
+    refinement_protection_padding_page_ratio: float = 0.002
 
 
 @dataclass(frozen=True)
