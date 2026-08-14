@@ -143,8 +143,10 @@ when the source PDF hash and effective configuration match the prior run.
 
 Displayed `Formula` and `Equation` regions receive a scale-aware whitespace collar
 in `visual_crop_bbox_px` after overlap correction and hierarchy stabilization.
-Each edge is constrained independently by protected semantic neighbors, peer
-Equations, structural parents, inferred columns, visible page ink, and page bounds.
+Only the top and bottom borders receive a whitespace collar; left and right stay
+at the logical Equation extent (apart from a verified Equation number). The two
+vertical edges are constrained and validated independently against protected
+semantic neighbors, peer Equations, structural parents, and page bounds.
 Vertical expansion has both an Equation-height target and a page-scale minimum, so
 very short detector boxes receive the same visible upper/lower treatment as taller
 Equations when neighboring whitespace permits it.
@@ -154,7 +156,9 @@ authoritative `bbox_px`, `resolved_bbox_px`, physical geometry, and reading orde
 remain unchanged; downstream Equation image extraction should use
 `equation_crops.equation_crop_bbox(region)`. Decisions and blockers are published
 under the `equation_visual_crop_refinement` diagnostic, and
-`render_equation_crop_overlay` compares physical and crop extents.
+`render_equation_crop_overlay` compares physical and crop extents. Ink immediately
+outside a tight detector edge is allowed inside the safe semantic corridor so a
+superscript, numerator, radical, or accent cannot cancel the top expansion.
 The standard semantic and resolved overlays also draw Formula/Equation regions
 with this visual crop, so the displayed yellow Equation box matches the extent
 that downstream Equation image extraction receives.

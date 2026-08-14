@@ -49,7 +49,7 @@ def test_isolated_equation_gets_scale_aware_visual_margin_only():
     equation = result.regions[0]
     assert equation["bbox_px"] == source["bbox_px"]
     assert equation["resolved_bbox_px"] == source["resolved_bbox_px"]
-    assert equation["visual_crop_bbox_px"] == [282.5, 285.0, 617.5, 365.0]
+    assert equation["visual_crop_bbox_px"] == [300.0, 285.0, 600.0, 365.0]
     assert result.changed is True
 
 
@@ -59,7 +59,7 @@ def test_short_equation_uses_page_scale_minimum_vertical_margin():
     crop = result.regions[0]["visual_crop_bbox_px"]
     assert crop[1] == 294.0
     assert crop[3] == 316.0
-    assert result.decisions[0]["desired_margin_px"]["vertical"] == 6.0
+    assert result.decisions[0]["desired_margin_px"] == {"top": 6.0, "bottom": 6.0}
 
 
 def test_text_above_and_below_independently_limit_vertical_edges():
@@ -81,7 +81,7 @@ def test_equation_immediately_followed_by_text_keeps_other_margins():
         region("below", "Text", [250, 351, 650, 410], "below"),
     ]
     crop = refined(regions).regions[0]["visual_crop_bbox_px"]
-    assert crop[:3] == [282.5, 285.0, 617.5]
+    assert crop[:3] == [300.0, 285.0, 600.0]
     assert crop[3] == 350.0
 
 
@@ -117,10 +117,9 @@ def test_other_column_is_a_structural_horizontal_boundary():
         region("left-text", "Text", [50, 100, 480, 200], column="left"),
         region("right-text", "Text", [520, 100, 950, 450], column="right"),
     ]
-    decision = refined(regions).decisions[0]
     crop = refined(regions).regions[0]["visual_crop_bbox_px"]
-    assert crop[2] < 500
-    assert decision["blockers"]["right"] in {"column", "right-text"}
+    assert crop[0] == 400.0
+    assert crop[2] == 480.0
 
 
 def test_figure_and_table_are_hard_boundaries():
@@ -151,7 +150,7 @@ def test_multiline_equation_uses_full_detector_union_and_keeps_physical_box():
     source = region("eq", "Equation", [200, 200, 700, 320], "a=b\nc=d")
     equation = refined([source]).regions[0]
     crop = equation["visual_crop_bbox_px"]
-    assert crop[0] < 200 and crop[1] < 200 and crop[2] > 700 and crop[3] > 320
+    assert crop[0] == 200 and crop[1] < 200 and crop[2] == 700 and crop[3] > 320
     assert equation["bbox_px"] == [200, 200, 700, 320]
 
 
@@ -160,21 +159,33 @@ def test_already_well_padded_equation_is_preserved(tmp_path):
     pages = page(tmp_path, ink=[(250, 225, 450, 275)])
     result = refined([source], pages)
     assert result.regions[0]["visual_crop_bbox_px"] == source["bbox_px"]
-    assert result.decisions[0]["reason"] == "sufficient_existing_visual_margin"
+    assert result.decisions[0]["reason"] == "sufficient_existing_vertical_margin"
 
 
-def test_visible_content_wall_stops_whitespace_expansion(tmp_path):
+def test_equation_owned_ink_above_source_does_not_cancel_top_expansion(tmp_path):
     source = region("eq", "Formula", [200, 200, 500, 300], "x=y")
-    pages = page(tmp_path, ink=[(200, 200, 499, 299), (510, 200, 515, 300)])
+    pages = page(tmp_path, ink=[(200, 200, 499, 299), (250, 185, 300, 199)])
     crop = refined([source], pages).regions[0]["visual_crop_bbox_px"]
-    assert crop[2] == 510.0
+    assert crop == [200.0, 182.0, 500.0, 318.0]
 
 
 def test_page_boundary_clips_each_edge():
     source = region("eq", "Formula", [0, 0, 200, 50], "x=y")
     crop = refined([source]).regions[0]["visual_crop_bbox_px"]
     assert crop[0] == 0 and crop[1] == 0
-    assert crop[2] > 200 and crop[3] > 50
+    assert crop[2] == 200 and crop[3] > 50
+
+
+def test_top_conflict_reverts_only_top_while_bottom_still_expands():
+    regions = [
+        region("eq", "Formula", [200, 200, 500, 250], "x=y"),
+        region("sliver", "Text", [498, 180, 518, 200], "nearby"),
+    ]
+    result = refined(regions)
+    crop = result.regions[0]["visual_crop_bbox_px"]
+    assert crop == [200.0, 200.0, 500.0, 265.0]
+    assert result.decisions[0]["top_decision"] == "reverted_conflict"
+    assert result.decisions[0]["bottom_decision"] == "expanded"
 
 
 def test_nested_equation_crop_stays_inside_parent():

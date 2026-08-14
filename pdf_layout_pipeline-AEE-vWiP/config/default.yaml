@@ -134,7 +134,6 @@ overlap_resolution:
 equation_crops:
   # Downstream crop margin only; physical and reading-order geometry is unchanged.
   enabled: true
-  horizontal_margin_height_ratio: 0.35
   vertical_margin_height_ratio: 0.30
   # Avoid a self-reinforcing tiny margin for unusually short detector boxes.
   minimum_vertical_margin_page_ratio: 0.006

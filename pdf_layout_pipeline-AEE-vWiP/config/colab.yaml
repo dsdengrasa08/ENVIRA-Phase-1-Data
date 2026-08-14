@@ -6,7 +6,6 @@ table_context:
   enabled: true
 equation_crops:
   enabled: true
-  horizontal_margin_height_ratio: 0.35
   vertical_margin_height_ratio: 0.30
   minimum_vertical_margin_page_ratio: 0.006
   minimum_clearance_height_ratio: 0.12

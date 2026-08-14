@@ -288,7 +288,6 @@ class EquationCropConfig:
     """Scale-aware, non-semantic padding for displayed Equation crops."""
 
     enabled: bool = True
-    horizontal_margin_height_ratio: float = 0.35
     vertical_margin_height_ratio: float = 0.30
     minimum_vertical_margin_page_ratio: float = 0.006
     minimum_clearance_height_ratio: float = 0.12
@@ -833,7 +832,6 @@ class PipelineConfig:
                 raise ValueError(f"overlap resolution {name} must be non-negative")
         equation_crops = self.equation_crops
         for name in (
-            "horizontal_margin_height_ratio",
             "vertical_margin_height_ratio",
             "minimum_vertical_margin_page_ratio",
             "minimum_clearance_height_ratio",
