@@ -73,6 +73,28 @@ def test_touching_side_by_side_boxes_are_treated_as_connected_conflict(tmp_path)
     assert by_id["right"]["bbox_px"][0] >= 488
 
 
+def test_neighbor_content_inside_oversized_box_does_not_become_its_core(tmp_path):
+    """A narrow neighboring axis label in A must not make A's extension supported."""
+    regions = [
+        region("left", "Figure", [51, 47, 488, 345]),
+        region("right", "Figure", [488, 47, 809, 760]),
+    ]
+    pages = page(
+        tmp_path,
+        [
+            (72, 64, 401, 284),
+            # Content belonging to the right Figure intrudes into the left source box.
+            (480, 120, 487, 310),
+            (515, 65, 799, 740),
+        ],
+        size=(860, 800),
+    )
+    result = refine_figure_boundaries(regions, pages, FigureFilterConfig())
+    by_id = {r["layout_region_id"]: r for r in result.regions}
+    assert result.proposals[0]["decision"] == "accepted"
+    assert by_id["left"]["bbox_px"][2] < 480
+
+
 def test_small_rounding_gap_can_trigger_analysis_but_large_clean_gap_does_not(tmp_path):
     regions = [
         region("left", "Figure", [50, 100, 499, 400]),

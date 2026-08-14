@@ -107,7 +107,14 @@ def _union(boxes: list[list[float]]) -> list[float] | None:
 
 
 def _owned_core(components, own_box, competing_box, axis: str, first: bool):
-    """Select components anchored in the side not claimed by the competitor."""
+    """Select the dominant component anchored away from the competitor.
+
+    Unioning every component inside an oversized source box is circular: content from
+    the neighboring Figure can already lie inside that box and then falsely becomes
+    part of its core.  Start from the dominant far-side component instead.  Candidate
+    cuts still pass removed-ink and semantic-region safeguards, so a detached genuine
+    component prevents an unsafe refinement downstream.
+    """
     coordinate = 0 if axis == "x" else 1
     far_edge = 2 if axis == "x" else 3
     if first:
@@ -128,7 +135,10 @@ def _owned_core(components, own_box, competing_box, axis: str, first: bool):
         fallback = max(
             components, key=lambda c: (c[coordinate] + c[far_edge]) / 2, default=None
         )
-    return _union(owned or ([fallback] if fallback else []))
+    candidates = owned or ([fallback] if fallback else [])
+    return (
+        list(max(candidates, key=lambda c: bbox_area(tuple(c)))) if candidates else None
+    )
 
 
 def _independent_caption_parents(
@@ -376,6 +386,8 @@ def refine_figure_boundaries(
                     "neighbor_gap_page_ratio": gap_ratio,
                     "cross_axis_overlap_ratio": cross_axis_overlap,
                     "connected_neighbor": connected_neighbor,
+                    "first_visual_core_bbox_px": first_core,
+                    "second_visual_core_bbox_px": second_core,
                 }
                 if not first_core or not second_core:
                     proposals.append(
@@ -403,6 +415,7 @@ def refine_figure_boundaries(
                     continue
                 low, high, density = valley
                 pair_changes = []
+                edge_evaluations = []
                 for region, old, core, edge, cut in (
                     (
                         first,
@@ -479,12 +492,26 @@ def refine_figure_boundaries(
                         if meaningful
                         else []
                     )
-                    if (
+                    accepted_edge = bool(
                         meaningful
                         and preserves_core
                         and removed_ink <= config.refinement_max_removed_ink_ratio
                         and not protected
-                    ):
+                    )
+                    edge_evaluations.append(
+                        {
+                            "figure_region_id": str(region["layout_region_id"]),
+                            "edge": edge,
+                            "source_bbox_px": list(old),
+                            "candidate_bbox_px": list(new),
+                            "meaningful": meaningful,
+                            "preserves_visual_core": preserves_core,
+                            "removed_ink_ratio": removed_ink,
+                            "protected_region_ids": protected,
+                            "accepted": accepted_edge,
+                        }
+                    )
+                    if accepted_edge:
                         source = list(region["bbox_px"])
                         apply_geometry_change(
                             region,
@@ -519,6 +546,7 @@ def refine_figure_boundaries(
                         "valley": [low, high],
                         "valley_density": density,
                         "changes": pair_changes,
+                        "edge_evaluations": edge_evaluations,
                     }
                 )
     for region in working:
