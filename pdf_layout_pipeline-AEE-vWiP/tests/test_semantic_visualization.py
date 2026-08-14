@@ -1,6 +1,21 @@
 from types import SimpleNamespace
 
-from envira_pdf_layout.visualization import _semantic_display_regions
+from envira_pdf_layout.visualization import _display_bbox, _semantic_display_regions
+
+
+def test_formula_display_uses_expanded_visual_crop_but_text_uses_physical_bbox():
+    formula = {
+        "type": "Formula",
+        "bbox_px": [100, 100, 300, 140],
+        "visual_crop_bbox_px": [95, 90, 305, 150],
+    }
+    text = {
+        "type": "Text",
+        "bbox_px": [100, 160, 300, 200],
+        "visual_crop_bbox_px": [95, 150, 305, 210],
+    }
+    assert _display_bbox(formula) == [95, 90, 305, 150]
+    assert _display_bbox(text) == [100, 160, 300, 200]
 
 
 def test_semantic_display_replaces_caption_members_with_one_group_box():
