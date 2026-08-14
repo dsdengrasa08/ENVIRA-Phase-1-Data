@@ -2,6 +2,8 @@ document:
   page_start: 1
   page_end: null
   render_dpi: 180
+  # Per-page PDFs are compatibility artifacts; processing reads the source PDF.
+  materialize_page_pdfs: false
 docling:
   do_ocr: false
   do_table_structure: true

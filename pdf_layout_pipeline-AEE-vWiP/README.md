@@ -58,6 +58,13 @@ The Docling converter is initialized once. The workflow then renders pages,
 converts the full selected range, processes layout regions, visibly renders the
 asset-aware overlays, and exports JSON, JSONL, Markdown, CSV, and PNG artifacts.
 
+Page rendering reuses one run-scoped PyMuPDF document handle. PNG page images
+retain the configured DPI and pixel format, while individual page-PDF
+compatibility artifacts are skipped by default because processing reads the
+source PDF directly. Set `document.materialize_page_pdfs: true` when those
+standalone page files are required by an external consumer. Page records keep
+their deterministic `page_pdf_path` values in either mode.
+
 ## Package map
 
 - `config.py`: immutable grouped run configuration and environment parsing.

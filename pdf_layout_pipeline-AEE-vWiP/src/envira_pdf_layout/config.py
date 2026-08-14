@@ -94,6 +94,7 @@ class DocumentConfig:
     page_start: int = 1
     page_end: int | None = None
     render_dpi: int = 180
+    materialize_page_pdfs: bool = False
     run_id: str = ""
     prefer_persistent_copy: bool = True
 
