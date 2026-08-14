@@ -54,8 +54,8 @@ figures:
   decomposition_max_foreground_bridge_ratio: 0.08
   decomposition_min_assignment_margin: 0.08
   decomposition_padding_page_ratio: 0.002
-  # Boundary refinement is conflict-driven and shrink-only.  A whitespace valley is
-  # never sufficient without competing semantic geometry and protected visual cores.
+  # Boundary refinement is conflict-driven. A whitespace valley is never sufficient
+  # without competing geometry; outward completion also requires visual support.
   refine_boundaries: true
   refinement_ink_threshold: 246
   refinement_min_component_area_ratio: 0.00005
@@ -66,6 +66,8 @@ figures:
   refinement_max_valley_density: 0.015
   refinement_min_valley_page_ratio: 0.003
   refinement_max_removed_ink_ratio: 0.015
+  refinement_min_added_ink_ratio: 0.002
+  refinement_max_edge_expansion_page_ratio: 0.08
   refinement_protection_padding_page_ratio: 0.002
 footer:
   enabled: true

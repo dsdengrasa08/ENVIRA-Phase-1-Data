@@ -182,6 +182,8 @@ class FigureFilterConfig:
     refinement_max_valley_density: float = 0.015
     refinement_min_valley_page_ratio: float = 0.003
     refinement_max_removed_ink_ratio: float = 0.015
+    refinement_min_added_ink_ratio: float = 0.002
+    refinement_max_edge_expansion_page_ratio: float = 0.08
     refinement_protection_padding_page_ratio: float = 0.002
 
 

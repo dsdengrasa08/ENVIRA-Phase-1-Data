@@ -1,9 +1,9 @@
 """Conflict-driven, provenance-preserving semantic boundary refinement.
 
-The first policy specializes the reusable edge proposal machinery for Figures.  It
-is deliberately shrink-only: whitespace creates candidate cuts, while competing
-semantic geometry, independent visual cores, and protected content decide whether
-an edge may move.
+The first policy specializes the reusable edge proposal machinery for Figures.
+Whitespace creates candidate cuts, while competing semantic geometry, independent
+visual cores, and protected content decide whether an edge may shrink or receive a
+bounded, visually supported completion into space released by its neighbor.
 """
 
 from __future__ import annotations
@@ -440,10 +440,15 @@ def refine_figure_boundaries(
                     new = list(old)
                     index = {"left": 0, "top": 1, "right": 2, "bottom": 3}[edge]
                     if edge in {"right", "bottom"}:
-                        new[index] = min(old[index], cut)
-                        removed = (
-                            [new[2], old[1], old[2], old[3]]
+                        new[index] = cut
+                        moving_outward = new[index] > old[index]
+                        changed_strip = (
+                            [old[2], old[1], new[2], old[3]]
+                            if edge == "right" and moving_outward
+                            else [new[2], old[1], old[2], old[3]]
                             if edge == "right"
+                            else [old[0], old[3], old[2], new[3]]
+                            if moving_outward
                             else [old[0], new[3], old[2], old[3]]
                         )
                         unsupported = (
@@ -452,10 +457,15 @@ def refine_figure_boundaries(
                             else [old[0], new[3], old[2], high]
                         )
                     else:
-                        new[index] = max(old[index], cut)
-                        removed = (
-                            [old[0], old[1], new[0], old[3]]
+                        new[index] = cut
+                        moving_outward = new[index] < old[index]
+                        changed_strip = (
+                            [new[0], old[1], old[0], old[3]]
+                            if edge == "left" and moving_outward
+                            else [old[0], old[1], new[0], old[3]]
                             if edge == "left"
+                            else [old[0], new[1], old[2], old[1]]
+                            if moving_outward
                             else [old[0], old[1], old[2], new[1]]
                         )
                         unsupported = (
@@ -475,12 +485,19 @@ def refine_figure_boundaries(
                     # measures whether the moving edge itself has visual support.
                     removed_ink = (
                         _ink_ratio(image, unsupported, config.refinement_ink_threshold)
-                        if meaningful
+                        if meaningful and not moving_outward
+                        else 0.0
+                    )
+                    added_ink = (
+                        _ink_ratio(
+                            image, changed_strip, config.refinement_ink_threshold
+                        )
+                        if meaningful and moving_outward
                         else 0.0
                     )
                     protected = (
                         _protected_intersections(
-                            removed,
+                            changed_strip,
                             page_regions,
                             {
                                 str(first["layout_region_id"]),
@@ -492,10 +509,18 @@ def refine_figure_boundaries(
                         if meaningful
                         else []
                     )
+                    expansion_ratio = abs(new[index] - old[index]) / max(extent, 1.0)
                     accepted_edge = bool(
                         meaningful
                         and preserves_core
-                        and removed_ink <= config.refinement_max_removed_ink_ratio
+                        and (
+                            moving_outward
+                            and added_ink >= config.refinement_min_added_ink_ratio
+                            and expansion_ratio
+                            <= config.refinement_max_edge_expansion_page_ratio
+                            or not moving_outward
+                            and removed_ink <= config.refinement_max_removed_ink_ratio
+                        )
                         and not protected
                     )
                     edge_evaluations.append(
@@ -506,7 +531,10 @@ def refine_figure_boundaries(
                             "candidate_bbox_px": list(new),
                             "meaningful": meaningful,
                             "preserves_visual_core": preserves_core,
+                            "operation": "expand" if moving_outward else "shrink",
                             "removed_ink_ratio": removed_ink,
+                            "added_ink_ratio": added_ink,
+                            "edge_change_page_ratio": expansion_ratio,
                             "protected_region_ids": protected,
                             "accepted": accepted_edge,
                         }
@@ -517,7 +545,11 @@ def refine_figure_boundaries(
                             region,
                             new,
                             stage="figure_boundary_refinement",
-                            reason="unsupported_edge_between_independent_visual_cores",
+                            reason=(
+                                "supported_neighbor_side_boundary_completion"
+                                if moving_outward
+                                else "unsupported_edge_between_independent_visual_cores"
+                            ),
                             accepted=True,
                             page_record=page,
                         )
@@ -529,7 +561,9 @@ def refine_figure_boundaries(
                                 "edge": edge,
                                 "source_bbox_px": source,
                                 "resolved_bbox_px": new,
+                                "operation": "expand" if moving_outward else "shrink",
                                 "removed_ink_ratio": removed_ink,
+                                "added_ink_ratio": added_ink,
                             }
                         )
                         changed = True
