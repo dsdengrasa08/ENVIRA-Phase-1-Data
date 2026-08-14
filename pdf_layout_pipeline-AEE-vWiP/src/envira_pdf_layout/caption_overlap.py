@@ -14,7 +14,10 @@ from typing import Any
 from .config import CaptionOverlapConfig
 from .geometry import bbox_area, intersection_area
 from .types import LayoutRegion
-from .semantic_caption import parse_semantic_caption_reference
+from .semantic_caption import (
+    leading_table_label_fragment,
+    parse_semantic_caption_reference,
+)
 from .orientation import project_bbox, region_orientation
 
 _CAPTION_TYPES = {"Caption"}
@@ -538,9 +541,23 @@ def build_caption_groups(regions, logical_tables, relationships, pages, config=N
         # Create one consumer-facing caption string. Source fragments and their
         # geometry remain separate, but overlapping boundary tokens are emitted
         # once (for example, "Table 3" plus "Table 3. Stalk yield ...").
-        semantic_tokens: list[str] = []
+        printed_label = str(
+            table.get("printed_label_text") or table.get("printed_label") or ""
+        ).strip()
+        semantic_tokens: list[str] = printed_label.split()
         for region_id in semantic_ids:
-            fragment_tokens = _text(by_id[region_id]).split()
+            fragment_text = _text(by_id[region_id])
+            if printed_label:
+                reference = parse_semantic_caption_reference(fragment_text)
+                if reference and reference.kind == "table":
+                    fragment_text = fragment_text[reference.end :].strip()
+                elif region_id in identifier_ids:
+                    # Number-only source fragments are represented by the
+                    # reconstructed printed label at the start of the group.
+                    fragment_text = ""
+                elif bare_label := leading_table_label_fragment(fragment_text):
+                    fragment_text = fragment_text[len(bare_label) :].lstrip(" .:-")
+            fragment_tokens = fragment_text.split()
             if not fragment_tokens:
                 continue
             normalized_existing = [

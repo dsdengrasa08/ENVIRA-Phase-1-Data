@@ -466,6 +466,47 @@ def test_compact_number_bbox_cannot_veto_rotated_fragment_reconstruction():
     assert caption["text"] == "Table 4 N2O emissions by treatment."
 
 
+def test_number_overlapping_bare_label_caption_is_absorbed_semantically():
+    from types import SimpleNamespace
+
+    from envira_pdf_layout.caption_overlap import (
+        annotate_caption_members,
+        build_caption_groups,
+    )
+    from envira_pdf_layout.visualization import _semantic_display_regions
+
+    regions = [
+        region("number", "Text", [150, 670, 200, 690], "4", 1),
+        region(
+            "caption",
+            "Caption",
+            [150, 100, 190, 700],
+            "Table Average N2O flux by treatment.",
+            2,
+            orientation=90,
+        ),
+        region("table", "Table", [205, 100, 700, 800], order=3),
+    ]
+    for item in regions:
+        item["resolved_reading_order"] = item["layout_reading_order"]
+        item["emission_policy"] = "emit_canonical"
+
+    logical = associate(regions)
+    group = logical[0]
+    assert group["identifier_region_ids"] == ["number"]
+    assert group["caption_region_ids"] == ["caption"]
+    captions = build_caption_groups(regions, logical, [], PAGES)
+    annotate_caption_members(regions, captions)
+    displayed = _semantic_display_regions(
+        SimpleNamespace(resolved_regions=regions, caption_groups=captions),
+        {"page_number": 1},
+    )
+
+    assert captions[0]["text"] == "Table 4 Average N2O flux by treatment."
+    assert [item["type"] for item in displayed] == ["Caption", "Table"]
+    assert all(item["layout_region_id"] != "number" for item in displayed)
+
+
 def test_fragmented_identifier_variants_join_a_detector_caption():
     variants = [
         (["TABLE", "IV"], "TABLE IV"),

@@ -2,6 +2,7 @@ from envira_pdf_layout.semantic_caption import (
     body_reference_evidence,
     caption_reference_quality,
     find_table_reference_mention,
+    leading_table_label_fragment,
     parse_semantic_caption_reference,
 )
 
@@ -69,3 +70,8 @@ def test_legitimate_uppercase_letter_identifier_remains_authoritative():
     quality = caption_reference_quality(text, reference)
     assert reference and reference.number == "A"
     assert quality["authoritative"] is True
+
+
+def test_bare_table_label_can_be_completed_by_a_neighboring_number():
+    assert leading_table_label_fragment("Table Average N2O flux") == "Table"
+    assert leading_table_label_fragment("Table 4. Average N2O flux") is None

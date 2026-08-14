@@ -22,6 +22,7 @@ from .semantic_caption import (
     body_reference_evidence,
     caption_reference_quality,
     find_table_reference_mention,
+    leading_table_label_fragment,
     parse_fragmented_table_reference,
     parse_semantic_caption_reference,
 )
@@ -256,6 +257,7 @@ def _score_edge(
             "components": components,
         },
         "printed_label": label_match.label if label_match else None,
+        "printed_label_text": text[: label_match.end].strip() if label_match else None,
         "caption_text_after_label": bool(
             label_match and text[label_match.end :].strip()
         ),
@@ -534,6 +536,7 @@ def _fragmented_identifier_candidates(
             if caption_table["side"] not in {"before", "after"}:
                 continue
             local_caption = project_bbox(cb, angle)
+            bare_caption_label = leading_table_label_fragment(caption.get("text"))
             lane = []
             for region in text_regions:
                 if region.get("type") not in {"Text", "List"}:
@@ -587,7 +590,8 @@ def _fragmented_identifier_candidates(
                 )
             )
             lane = lane[:8]
-            for size in range(2, min(4, len(lane)) + 1):
+            minimum_size = 1 if bare_caption_label else 2
+            for size in range(minimum_size, min(4, len(lane)) + 1):
                 for selection in combinations(lane, size):
                     local_sorted = sorted(
                         selection, key=lambda item: item[1].inline_min
@@ -606,8 +610,11 @@ def _fragmented_identifier_candidates(
                         ]
                         if gaps and max(gaps) > 0.025:
                             continue
+                        fragment_values = [member.get("text") for member in members]
+                        if bare_caption_label:
+                            fragment_values.insert(0, bare_caption_label)
                         parsed = parse_fragmented_table_reference(
-                            [member.get("text") for member in members],
+                            fragment_values,
                             allow_ocr_tolerance=True,
                         )
                         if not parsed or any(
@@ -631,6 +638,7 @@ def _fragmented_identifier_candidates(
                         )
                         if (
                             cluster_same_line
+                            and not bare_caption_label
                             and orientation.get("source") != "bbox_axis"
                             and max(item.inline_max for item in member_locals)
                             > local_caption.inline_min + scale * 0.008
@@ -980,6 +988,7 @@ def _reference_fragment_edge(
         "accepted": False,
         "direction": caption_side,
         "printed_label": reference.label,
+        "printed_label_text": str(candidate.get("text") or "")[: reference.end].strip(),
         "semantic_reference": reference.__dict__,
         "semantic_reference_quality": reference_quality,
         "features": {
@@ -1135,6 +1144,7 @@ def associate_table_context(
                 "caption_side": None,
                 "note_region_ids": [],
                 "printed_label": None,
+                "printed_label_text": None,
                 "associations": [],
                 "confidence": 0.0,
                 "group_bbox": list(table["bbox_px"]),
@@ -1205,6 +1215,11 @@ def associate_table_context(
                     group["identifier_region_ids"].extend(source_ids)
                     group["printed_label"] = (
                         group["printed_label"] or winner["printed_label"]
+                    )
+                    group["printed_label_text"] = (
+                        group["printed_label_text"]
+                        or winner.get("printed_label_text")
+                        or winner["printed_label"]
                     )
                     if winner["caption_text_after_label"]:
                         group["caption_region_ids"].extend(source_ids)
@@ -1289,6 +1304,11 @@ def associate_table_context(
             group["identifier_region_ids"].append(region_id)
             group["caption_region_ids"].append(region_id)
             group["printed_label"] = group["printed_label"] or winner["printed_label"]
+            group["printed_label_text"] = (
+                group["printed_label_text"]
+                or winner.get("printed_label_text")
+                or winner["printed_label"]
+            )
             group["associations"].append(winner)
             owned.add(region_id)
 

@@ -40,6 +40,11 @@ _NOTE_CONTINUATION_RE = re.compile(
     r"parentheses\b|notes?\s*:|sources?\s*:)",
     re.IGNORECASE,
 )
+_BARE_TABLE_LABEL_RE = re.compile(
+    r"^(?P<label>(?:(?:supplementary|supplemental|extended\s+data)\s+)?"
+    r"(?:table|tab\.?))(?=\s|$)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,15 @@ def normalize_caption_text(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = text.replace("\u00a0", " ").replace("–", "-").replace("—", "-")
     return " ".join(text.split())
+
+
+def leading_table_label_fragment(value: Any) -> str | None:
+    """Return a leading bare Table label when no complete identifier is present."""
+    text = normalize_caption_text(value)
+    if parse_semantic_caption_reference(text) is not None:
+        return None
+    match = _BARE_TABLE_LABEL_RE.match(text)
+    return match.group("label") if match else None
 
 
 def parse_semantic_caption_reference(
