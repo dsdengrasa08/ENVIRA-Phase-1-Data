@@ -1,9 +1,0 @@
-runtime:
-  use_google_drive: false
-  drive_mount_point: /content/drive
-  project_dir: /content/drive/MyDrive/ENVIRA/pdf-layout-gradio
-document:
-  materialize_page_pdfs: false
-docling:
-  require_model_manifest: true
-  bootstrap_legacy_model_manifest: true
