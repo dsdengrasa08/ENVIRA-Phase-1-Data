@@ -7,7 +7,7 @@ import gradio as gr
 
 from ..errors import WebAppError
 from ..services.processing import ProcessingService
-from .presenters import load_overlay_image
+from .presenters import load_overlay_pixels
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,8 +26,14 @@ def build_gradio_app(processing: ProcessingService) -> gr.Blocks:
         )
 
         def process_upload(uploaded_path: str | None, progress=gr.Progress()):
+            # A generator lets the status change immediately while the queued
+            # pipeline request is running.  Clearing the gallery here also
+            # prevents results from a previous document being mistaken for
+            # the current document's output.
             if not uploaded_path:
-                return [], "Select a PDF before starting."
+                yield [], "Select a PDF before starting."
+                return
+            yield [], "Processing PDF…"
             try:
                 progress(0.05, desc="Validating PDF")
                 result = processing.process(uploaded_path)
@@ -37,16 +43,16 @@ def build_gradio_app(processing: ProcessingService) -> gr.Blocks:
                 # external-path restriction and accidental serving of other run
                 # artifacts from the persistent output tree.
                 images = [
-                    (load_overlay_image(path), f"Page {index}")
+                    (load_overlay_pixels(path), f"Page {index}")
                     for index, path in enumerate(result.overlay_paths, 1)
                 ]
                 qualifier = " with warnings" if result.status != "complete" else ""
-                return images, f"Complete{qualifier} — {result.page_count} page(s) processed."
+                yield images, f"Complete{qualifier} — {result.page_count} page(s) processed."
             except WebAppError as exc:
-                return [], str(exc)
+                yield [], str(exc)
             except Exception:
                 LOGGER.exception("Unexpected PDF processing failure")
-                return [], "Layout processing failed. Please check the persistent run logs."
+                yield [], "Layout processing failed. Please check the persistent run logs."
 
         process_button.click(
             process_upload,

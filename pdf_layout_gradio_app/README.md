@@ -14,16 +14,18 @@ This directory contains its own pipeline implementation, configuration, schemas,
 
 The notebook is deliberately a launcher. Core processing is implemented in the Python modules under `src/`.
 The installation cell uses the active notebook kernel's Python executable and explicitly registers the standalone `src/` directory, so the following import cells work without a kernel restart.
-The launch cell requests Gradio's standard public share link and does not present
-Colab's kernel-local `localhost` address as the application entry point. Gradio
-manages the public URL; the application does not select a port or construct a
-Colab proxy URL. In Colab, `debug=True` keeps request errors visible in the cell
-output; stop the cell when finished.
+The launch cell requests Gradio's standard public share link and enables Gradio's
+supported inline notebook display. If the public share service is unavailable,
+Gradio can render its own Colab-managed iframe instead of leaving the cell with no
+application. The application does not select a port or construct a proxy URL. In
+Colab, `debug=True` keeps request errors visible in the cell output; stop the cell
+when finished.
 
-Creating the public URL depends on Gradio's share service. If Gradio reports that
-it could not create a share link, check the runtime's internet access and Gradio's
-service status, then rerun the launch cell. The application intentionally does not
-fall back to a manually generated Colab proxy URL.
+A public URL still depends on Gradio's share service. If that service is unavailable,
+use the inline application or the link rendered with it. A share URL expires when
+its Gradio server is stopped; rerunning the setup and launch cells creates a new
+server and display. The setup cell closes an earlier notebook server before replacing
+it. No application-owned proxy fallback is used.
 
 ## Persistent output
 
@@ -35,7 +37,7 @@ The default Colab output root is:
 
 Override it before launch with `ENVIRA_WEB_OUTPUT_ROOT`. Each document uses a sanitized original stem plus a content-hash identifier, and each submission adds a UTC timestamp and random run ID. Final overlays are stored below the run's `overlays/` directory and the same files are displayed in the Gradio Gallery.
 
-The UI reads those persistent overlay files into in-memory RGB images before returning them to Gradio. This lets Gradio create safe presentation-cache files without granting web access to the Google Drive output tree or its internal JSON and diagnostic artifacts.
+The UI copies those persistent overlay files into RGB pixel arrays with no Drive-path metadata before returning them to Gradio. This lets Gradio create safe presentation-cache files without granting web access to the Google Drive output tree or its internal JSON and diagnostic artifacts.
 
 The persistent tree also retains the source copy, rendered pages, pipeline JSON/JSONL/CSV artifacts, manifest, event log, configuration, diagnostics, and terminal status marker according to pipeline privacy settings. Gradio never exposes those internal artifacts.
 
@@ -65,4 +67,4 @@ The Docling model policy is inherited from the pipeline configuration. Provision
 
 ## UI contract
 
-Visible processing output is limited to the final semantic overlay PNGs in page order. The status area contains operational messages only. Extracted text, coordinates, raw detections, JSON, diagnostics, tracebacks, and Drive paths are not rendered in the interface.
+Visible processing output is limited to the final semantic overlay PNGs in page order. The status area is cleared and updated when each queued request starts, and contains operational messages only. Extracted text, coordinates, raw detections, JSON, diagnostics, tracebacks, and Drive paths are not rendered in the interface.
