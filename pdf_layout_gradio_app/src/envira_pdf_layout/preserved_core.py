@@ -263,7 +263,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         import unicodedata
         from difflib import SequenceMatcher
 
-        import fitz
+        import pymupdf as fitz
 
         # =============================================================================
         # PDF INPUT CONFIG
@@ -1817,7 +1817,7 @@ def run_preserved_core(conversion, page_set, config) -> PipelineResult:
         from typing import Dict, List, Optional, Tuple
 
         import cv2
-        import fitz
+        import pymupdf as fitz
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd

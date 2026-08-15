@@ -70,7 +70,7 @@ class ProcessingService:
 
     @staticmethod
     def _validate_pdf_structure(source: Path) -> None:
-        import fitz
+        import pymupdf as fitz
         try:
             with fitz.open(source) as document:
                 if document.needs_pass:

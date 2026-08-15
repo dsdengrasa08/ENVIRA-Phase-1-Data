@@ -7,6 +7,7 @@ import gradio as gr
 
 from ..errors import WebAppError
 from ..services.processing import ProcessingService
+from .presenters import load_overlay_image
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,14 @@ def build_gradio_app(processing: ProcessingService) -> gr.Blocks:
                 progress(0.05, desc="Validating PDF")
                 result = processing.process(uploaded_path)
                 progress(1.0, desc="Complete")
-                images = [(str(path), f"Page {index}") for index, path in enumerate(result.overlay_paths, 1)]
+                # Return in-memory RGB images rather than persistent Drive paths.
+                # Gradio creates its own cache files for images, avoiding both its
+                # external-path restriction and accidental serving of other run
+                # artifacts from the persistent output tree.
+                images = [
+                    (load_overlay_image(path), f"Page {index}")
+                    for index, path in enumerate(result.overlay_paths, 1)
+                ]
                 qualifier = " with warnings" if result.status != "complete" else ""
                 return images, f"Complete{qualifier} — {result.page_count} page(s) processed."
             except WebAppError as exc:

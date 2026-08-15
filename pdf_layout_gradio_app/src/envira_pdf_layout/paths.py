@@ -21,7 +21,7 @@ def safe_name(value: str) -> str:
 
 
 def prepare_document_context(config: PipelineConfig) -> DocumentIdentity:
-    import fitz
+    import pymupdf as fitz
 
     source = config.document.source_pdf.expanduser().resolve()
     if not source.is_file():

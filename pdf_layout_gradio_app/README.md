@@ -25,6 +25,8 @@ The default Colab output root is:
 
 Override it before launch with `ENVIRA_WEB_OUTPUT_ROOT`. Each document uses a sanitized original stem plus a content-hash identifier, and each submission adds a UTC timestamp and random run ID. Final overlays are stored below the run's `overlays/` directory and the same files are displayed in the Gradio Gallery.
 
+The UI reads those persistent overlay files into in-memory RGB images before returning them to Gradio. This lets Gradio create safe presentation-cache files without granting web access to the Google Drive output tree or its internal JSON and diagnostic artifacts.
+
 The persistent tree also retains the source copy, rendered pages, pipeline JSON/JSONL/CSV artifacts, manifest, event log, configuration, diagnostics, and terminal status marker according to pipeline privacy settings. Gradio never exposes those internal artifacts.
 
 Temporary uploaded and working files use `ENVIRA_WEB_TEMP_ROOT` (default `/content/envira-layout-web`) and are deleted at the end of each request. Persistent output paths are never cleaned by the temporary workspace manager.
