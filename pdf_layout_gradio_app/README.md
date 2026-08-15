@@ -14,10 +14,11 @@ This directory contains its own pipeline implementation, configuration, schemas,
 
 The notebook is deliberately a launcher. Core processing is implemented in the Python modules under `src/`.
 The installation cell uses the active notebook kernel's Python executable and explicitly registers the standalone `src/` directory, so the following import cells work without a kernel restart.
-The launch cell uses Gradio's standard notebook launch mechanism. Gradio handles
-the inline application and its share link; the application does not select a
-port or construct a Colab proxy URL. The launch cell remains active while the
-application is running and can be stopped from the notebook when finished.
+The launch cell uses Gradio's standard inline notebook mechanism. It deliberately
+does not request an external `gradio.live` share tunnel, so a share-service outage
+does not prevent the Colab-embedded application from starting. The application
+does not select a port or construct a Colab proxy URL. In Colab, `debug=True`
+keeps request errors visible in the cell output; stop the cell when finished.
 
 ## Persistent output
 
