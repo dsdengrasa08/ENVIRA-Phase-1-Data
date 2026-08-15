@@ -8,5 +8,9 @@ def test_launcher_is_lightweight_and_independent():
     source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
     assert "create_app" in source
     assert "drive.mount" in source
+    assert 'sys.executable, "-m", "pip"' in source
+    assert 'APP_DIR / "src"' in source
+    assert "sys.path.insert(0, standalone_src)" in source
+    assert 'find_spec("envira_layout_web")' in source
     assert "run_layout_pipeline" not in source
     assert "pdf_layout_pipeline-AEE-vWiP" not in source

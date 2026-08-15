@@ -13,6 +13,7 @@ This directory contains its own pipeline implementation, configuration, schemas,
 5. Upload a PDF in the launched Gradio application.
 
 The notebook is deliberately a launcher. Core processing is implemented in the Python modules under `src/`.
+The installation cell uses the active notebook kernel's Python executable and explicitly registers the standalone `src/` directory, so the following import cells work without a kernel restart.
 
 ## Persistent output
 
