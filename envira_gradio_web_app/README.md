@@ -35,6 +35,12 @@ runtime = initialize_application(settings)
 create_app(runtime).queue().launch()
 ```
 
+For notebook/Colab use, prefer `launch_application(demo)`. It prevents duplicate
+servers when the launch cell is rerun, disables the blocking debug loop, and falls
+back to Colab's authenticated kernel-port iframe if Gradio cannot create a public
+share tunnel. `close_application(demo)` stops only the Gradio server; it does not
+terminate the Colab runtime. Closing the browser tab does not stop either one.
+
 ## Architecture
 
 - `app.py`: host-facing initialization and Gradio factory.
@@ -70,3 +76,8 @@ RGB images before they are returned to `gr.Gallery`. The application intentional
 does not pass Drive paths to Gradio or add the persistent root to `allowed_paths`:
 that avoids both Gradio file-route rejections and accidental web access to the raw
 JSON, extracted text, manifests, and other private artifacts stored beside overlays.
+
+If the console says `Could not create share link`, layout processing has not failed:
+the external Gradio tunnel service is unreachable. The launcher automatically uses
+the Colab kernel proxy instead. A Colab runtime restart/disconnect still terminates
+the server and clears in-memory models, while completed Drive outputs remain.
