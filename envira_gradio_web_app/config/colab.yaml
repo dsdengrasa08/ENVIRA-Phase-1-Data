@@ -1,0 +1,25 @@
+runtime:
+  use_google_drive: true
+  drive_mount_point: /content/drive
+  project_dir: /content/drive/MyDrive/00-ENVIRA/01-LayoutParser/phase1_docling
+  # Keep executable runtime helpers such as Gradio's frpc off the Drive/FUSE mount.
+  local_cache_root: /content/envira_gradio_runtime
+docling:
+  # A fresh Colab runtime may populate the persistent Hugging Face cache during
+  # one-time backend initialization. Subsequent sessions reuse that Drive cache.
+  use_local_artifacts: false
+  require_saved_models: false
+  require_model_manifest: false
+  auto_download_models: false
+table_context:
+  enabled: true
+equation_crops:
+  enabled: true
+  vertical_margin_height_ratio: 0.30
+  minimum_vertical_margin_page_ratio: 0.006
+  minimum_clearance_height_ratio: 0.12
+  maximum_margin_page_ratio: 0.018
+  neighbor_corridor_overlap_ratio: 0.20
+  equation_number_max_gap_page_ratio: 0.20
+  ink_threshold: 235
+  minimum_ink_pixels: 3
