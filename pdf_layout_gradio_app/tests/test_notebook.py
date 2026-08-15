@@ -16,3 +16,5 @@ def test_launcher_is_lightweight_and_independent():
     assert "debug=IN_COLAB" not in source
     assert "run_layout_pipeline" not in source
     assert "pdf_layout_pipeline-AEE-vWiP" not in source
+    assert "Gradio share service was unavailable" not in source
+    assert all(not cell.get("outputs") for cell in notebook["cells"])
