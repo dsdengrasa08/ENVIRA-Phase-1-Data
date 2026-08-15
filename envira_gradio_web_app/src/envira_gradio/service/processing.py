@@ -10,6 +10,8 @@ import tempfile
 import threading
 from uuid import uuid4
 
+from PIL import Image
+
 from ..pipeline.application import run_pdf
 from ..pipeline.config import PipelineConfig
 from ..pipeline.docling_backend import DoclingBackend
@@ -32,7 +34,9 @@ class ProcessingService:
         self.model_report = model_report
         self._processing_lock = threading.Lock()
 
-    def process(self, uploaded_pdf: str | Path | None, progress=None) -> list[tuple[str, str]]:
+    def process(
+        self, uploaded_pdf: str | Path | None, progress=None
+    ) -> list[tuple[Image.Image, str]]:
         if not uploaded_pdf:
             raise ValueError("Select a PDF before starting processing.")
         source = Path(uploaded_pdf).expanduser().resolve()
@@ -63,4 +67,13 @@ class ProcessingService:
                 raise RuntimeError("Processing completed without producing overlay images")
             if progress:
                 progress(1.0, desc="Complete")
-            return [(str(path), f"Page {index}") for index, path in enumerate(overlays, 1)]
+            # Do not give Gradio paths into the mounted Drive. Gradio may reject
+            # files outside its cache/allowed paths, and allowing the whole Drive
+            # output root would expose private pipeline artifacts through its file
+            # route. Materialize detached images instead; these pixels come from
+            # the exact validated overlay files that remain persistent in Drive.
+            gallery_items = []
+            for index, path in enumerate(overlays, 1):
+                with Image.open(path) as image:
+                    gallery_items.append((image.convert("RGB").copy(), f"Page {index}"))
+            return gallery_items

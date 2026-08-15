@@ -64,3 +64,9 @@ The Gradio interface deliberately shows a generic error so internal paths and
 processing details are not exposed to web users. The complete exception is logged
 to the Colab/server console and, after a run directory has been created, recorded
 in the private `run_failure.json` file in that run's persistent output directory.
+
+Final overlays are loaded from their validated Google Drive copies into detached
+RGB images before they are returned to `gr.Gallery`. The application intentionally
+does not pass Drive paths to Gradio or add the persistent root to `allowed_paths`:
+that avoids both Gradio file-route rejections and accidental web access to the raw
+JSON, extracted text, manifests, and other private artifacts stored beside overlays.

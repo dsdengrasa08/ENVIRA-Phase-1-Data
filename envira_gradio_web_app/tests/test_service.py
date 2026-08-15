@@ -2,6 +2,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+from PIL import Image
+
 from envira_gradio.service import processing as processing_module
 from envira_gradio.service.processing import ProcessingService
 from envira_gradio.settings import AppSettings
@@ -34,7 +36,8 @@ def test_service_returns_only_ordered_overlay_paths_and_cleans_staging(tmp_path,
     overlay_dir = settings.persistent_root / "overlays"
     overlay_dir.mkdir(parents=True)
     paths = [overlay_dir / "page_0002.png", overlay_dir / "page_0001.png"]
-    for path in paths: path.write_bytes(b"image")
+    for path in paths:
+        Image.new("RGB", (12, 8), "white").save(path)
     monkeypatch.setattr(
         processing_module,
         "run_pdf",
@@ -43,7 +46,8 @@ def test_service_returns_only_ordered_overlay_paths_and_cleans_staging(tmp_path,
     progress = Progress()
     service = ProcessingService(settings, base, object())
     result = service.process(upload, progress)
-    assert [Path(item[0]).name for item in result] == ["page_0001.png", "page_0002.png"]
+    assert all(isinstance(item[0], Image.Image) for item in result)
+    assert [item[0].size for item in result] == [(12, 8), (12, 8)]
     assert [item[1] for item in result] == ["Page 1", "Page 2"]
     assert list(settings.temporary_root.iterdir()) == []
     assert progress.updates[-1][0] == 1.0
