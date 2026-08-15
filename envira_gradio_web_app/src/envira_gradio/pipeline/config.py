@@ -84,6 +84,7 @@ class RuntimeConfig:
     project_dir: Path = Path(
         "/content/drive/MyDrive/00-ENVIRA/01-LayoutParser/phase1_docling"
     )
+    local_cache_root: Path = Path("/content/envira_gradio_runtime")
     offline: bool = False
     skip_pip_install: bool = False
 

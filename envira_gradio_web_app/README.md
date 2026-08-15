@@ -91,3 +91,15 @@ presentation. Local non-secret diagnostics report the installed Gradio version,
 Colab detection, tunnel-binary readiness, certificate-directory writability, and
 whether a proxy is configured. A missing public URL does not change PDF processing
 or Google Drive persistence.
+
+In Colab, `HF_HOME` is deliberately runtime-local so Gradio downloads and executes
+`frpc` from `/content/envira_gradio_runtime` rather than the Google Drive FUSE mount.
+`HF_HUB_CACHE` remains under the persistent project cache, so large Docling/Hugging
+Face model blobs continue to survive runtime restarts. Run application initialization
+before importing Gradio so these cache locations take effect.
+
+After upgrading from an earlier app version, **restart the Colab runtime before Run
+All**. Gradio calculates its `frpc` path when `gradio.tunneling` is first imported;
+changing `HF_HOME` later cannot relocate that already-loaded module. Initialization
+now stops with an explicit restart instruction instead of silently reusing a Drive-
+backed executable path.
