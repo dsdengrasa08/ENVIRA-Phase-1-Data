@@ -94,7 +94,7 @@ def launch_application(
     _, local_url, share_url = demo.launch(
         share=share,
         inline=colab,
-        debug=False,
+        debug=True,
         prevent_thread_lock=False,
         show_error=False,
         height=height,
