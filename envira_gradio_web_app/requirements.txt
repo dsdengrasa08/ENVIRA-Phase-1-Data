@@ -1,0 +1,11 @@
+# Standalone Colab/runtime dependencies. This file has no reference-package dependency.
+gradio==6.24.0
+docling>=2,<3
+PyMuPDF>=1.23,<2
+opencv-python-headless>=4.8,<5
+pandas>=2,<3
+matplotlib>=3.7,<4
+tqdm>=4.66,<5
+numpy>=1.26,<3
+PyYAML>=6,<7
+Pillow>=10,<13
