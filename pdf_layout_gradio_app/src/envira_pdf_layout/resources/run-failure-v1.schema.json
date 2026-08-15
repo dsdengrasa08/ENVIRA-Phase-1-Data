@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ENVIRA sanitized run failure v1",
+  "type": "object",
+  "required": ["failure_schema_version", "status", "run_id", "document_id", "exception_type", "message"],
+  "properties": {
+    "failure_schema_version": {"const": 1},
+    "status": {"enum": ["failed", "cancelled"]},
+    "run_id": {"type": "string", "minLength": 1},
+    "document_id": {"type": "string", "minLength": 1},
+    "exception_type": {"type": "string"},
+    "message": {"type": "string"}
+  }
+}
