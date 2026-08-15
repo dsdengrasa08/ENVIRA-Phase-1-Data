@@ -65,4 +65,4 @@ The Docling model policy is inherited from the pipeline configuration. Provision
 
 ## UI contract
 
-Visible processing output is limited to the final semantic overlay PNGs in page order. The status area contains operational messages only. Extracted text, coordinates, raw detections, JSON, diagnostics, tracebacks, and Drive paths are not rendered in the interface.
+Visible processing output is limited to the final semantic overlay PNGs in page order. The status area is cleared and updated when each queued request starts, and contains operational messages only. Extracted text, coordinates, raw detections, JSON, diagnostics, tracebacks, and Drive paths are not rendered in the interface.
