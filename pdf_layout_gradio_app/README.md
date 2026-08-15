@@ -22,7 +22,7 @@ output; stop the cell when finished.
 
 Creating the public URL depends on Gradio's share service. If Gradio reports that
 it could not create a share link, check the runtime's internet access and Gradio's
-service status, then rerun the launch cell. The application intentionally does not
+service status, then rerun the launch cell. A share URL expires when its Gradio server is stopped; rerunning the setup and launch cells creates a new server and URL. The setup cell closes an earlier notebook server before replacing it. The application intentionally does not
 fall back to a manually generated Colab proxy URL.
 
 ## Persistent output
@@ -35,7 +35,7 @@ The default Colab output root is:
 
 Override it before launch with `ENVIRA_WEB_OUTPUT_ROOT`. Each document uses a sanitized original stem plus a content-hash identifier, and each submission adds a UTC timestamp and random run ID. Final overlays are stored below the run's `overlays/` directory and the same files are displayed in the Gradio Gallery.
 
-The UI reads those persistent overlay files into in-memory RGB images before returning them to Gradio. This lets Gradio create safe presentation-cache files without granting web access to the Google Drive output tree or its internal JSON and diagnostic artifacts.
+The UI copies those persistent overlay files into RGB pixel arrays with no Drive-path metadata before returning them to Gradio. This lets Gradio create safe presentation-cache files without granting web access to the Google Drive output tree or its internal JSON and diagnostic artifacts.
 
 The persistent tree also retains the source copy, rendered pages, pipeline JSON/JSONL/CSV artifacts, manifest, event log, configuration, diagnostics, and terminal status marker according to pipeline privacy settings. Gradio never exposes those internal artifacts.
 

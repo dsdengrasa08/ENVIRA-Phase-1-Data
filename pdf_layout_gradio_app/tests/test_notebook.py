@@ -7,6 +7,7 @@ def test_launcher_is_lightweight_and_independent():
     notebook = json.loads((root / "run_gradio_web_app.ipynb").read_text(encoding="utf-8"))
     source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
     assert "create_app" in source
+    assert "previous_demo.close()" in source
     assert "drive.mount" in source
     assert 'sys.executable, "-m", "pip"' in source
     assert 'APP_DIR / "src"' in source

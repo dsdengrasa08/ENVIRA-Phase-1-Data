@@ -7,7 +7,7 @@ import gradio as gr
 
 from ..errors import WebAppError
 from ..services.processing import ProcessingService
-from .presenters import load_overlay_image
+from .presenters import load_overlay_pixels
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def build_gradio_app(processing: ProcessingService) -> gr.Blocks:
                 # external-path restriction and accidental serving of other run
                 # artifacts from the persistent output tree.
                 images = [
-                    (load_overlay_image(path), f"Page {index}")
+                    (load_overlay_pixels(path), f"Page {index}")
                     for index, path in enumerate(result.overlay_paths, 1)
                 ]
                 qualifier = " with warnings" if result.status != "complete" else ""
