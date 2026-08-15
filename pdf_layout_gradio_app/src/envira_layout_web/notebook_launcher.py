@@ -23,12 +23,18 @@ def launch_notebook_app(
     proxy_display: Callable[[str], None] | None = None,
     server_port: int = 7860,
 ) -> NotebookLaunchResult:
-    """Launch without blocking and embed a Colab proxy if sharing is unavailable."""
+    """Launch without blocking and expose Colab servers through its kernel proxy.
+
+    Colab already provides an authenticated proxy for kernel ports.  Using that
+    proxy directly avoids making notebook startup depend on Gradio's external
+    share-tunnel service.
+    """
     demo.queue(default_concurrency_limit=max(1, concurrency_limit))
     launched = demo.launch(
-        share=in_colab,
-        inline=in_colab,
+        share=False,
+        inline=False,
         debug=False,
+        quiet=in_colab,
         prevent_thread_lock=True,
         server_name="0.0.0.0",
         server_port=server_port,
@@ -36,7 +42,7 @@ def launch_notebook_app(
     local_url = getattr(demo, "local_url", None) or _tuple_value(launched, 1)
     share_url = getattr(demo, "share_url", None) or _tuple_value(launched, 2)
     proxy_url = None
-    if in_colab and not share_url:
+    if in_colab:
         factory = proxy_url_factory or _colab_proxy_url
         proxy_url = factory(server_port)
         display = proxy_display or _display_proxy
@@ -63,7 +69,7 @@ def _display_proxy(url: str) -> None:
     safe_url = escape(url, quote=True)
     display(
         HTML(
-            '<p><strong>Gradio share service unavailable.</strong> '
+            "<p><strong>Gradio is running through Colab's authenticated proxy.</strong> "
             f'<a href="{safe_url}" target="_blank">Open the Colab-proxied app</a>.</p>'
             f'<iframe src="{safe_url}" width="100%" height="800" '
             'style="border:1px solid #ddd;border-radius:8px"></iframe>'
