@@ -12,5 +12,7 @@ def test_launcher_is_lightweight_and_independent():
     assert 'APP_DIR / "src"' in source
     assert "sys.path.insert(0, standalone_src)" in source
     assert 'find_spec("envira_layout_web")' in source
+    assert "launch_notebook_app" in source
+    assert "debug=IN_COLAB" not in source
     assert "run_layout_pipeline" not in source
     assert "pdf_layout_pipeline-AEE-vWiP" not in source
