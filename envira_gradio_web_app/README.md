@@ -36,10 +36,10 @@ create_app(runtime).queue().launch()
 ```
 
 For notebook/Colab use, prefer `launch_application(demo)`. It prevents duplicate
-servers when the launch cell is rerun, disables the blocking debug loop, and falls
-back to Colab's authenticated kernel-port iframe only after bounded native Gradio
-share attempts fail. `close_application(demo)` stops only the Gradio server; it does
-not terminate the Colab runtime. Closing the browser tab does not stop either one.
+servers when the launch cell is rerun and otherwise delegates public sharing and
+Colab inline presentation directly to Gradio. `close_application(demo)` stops only
+the Gradio server; it does not terminate the Colab runtime. Closing the browser tab
+does not stop either one.
 
 ## Architecture
 
@@ -78,16 +78,16 @@ that avoids both Gradio file-route rejections and accidental web access to the r
 JSON, extracted text, manifests, and other private artifacts stored beside overlays.
 
 If the console says `Could not create share link`, layout processing has not failed:
-the external Gradio tunnel service is unreachable. The launcher automatically uses
-the Colab kernel proxy instead. A Colab runtime restart/disconnect still terminates
+the external Gradio tunnel service is unreachable. Gradio's own Colab inline
+presentation remains available. A Colab runtime restart/disconnect still terminates
 the server and clears in-memory models, while completed Drive outputs remain.
 
 Creating a Gradio share URL requires broker discovery, an `frpc` binary, and an
 outbound connection to the returned tunnel endpoint. Colab, a network proxy,
 regional filtering, or a Gradio service incident can block those steps. The launcher
-does not duplicate or gate Gradio's broker request: native `demo.launch(share=True)`
-is the source of truth and is retried once. Local non-secret diagnostics report the
-installed Gradio version, Colab detection, tunnel-binary readiness, certificate
-directory writability, and whether a proxy is configured. If Gradio still returns
-no public URL, the authenticated Colab proxy is used without changing PDF processing
+does not duplicate, retry, or gate Gradio's broker request: one native
+`demo.launch(share=True, inline=True)` call owns both the public URL and Colab
+presentation. Local non-secret diagnostics report the installed Gradio version,
+Colab detection, tunnel-binary readiness, certificate-directory writability, and
+whether a proxy is configured. A missing public URL does not change PDF processing
 or Google Drive persistence.

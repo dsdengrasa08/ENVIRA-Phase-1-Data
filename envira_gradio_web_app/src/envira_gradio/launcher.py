@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import importlib.util
 import os
 from pathlib import Path
-import time
-from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -37,13 +35,6 @@ class LaunchInfo:
 
 def in_colab() -> bool:
     return importlib.util.find_spec("google.colab") is not None
-
-
-def _port_from_url(url: str) -> int:
-    parsed = urlparse(url)
-    if parsed.port is None:
-        raise ValueError(f"Gradio local URL has no port: {url}")
-    return parsed.port
 
 
 def share_diagnostics(*, colab: bool | None = None) -> ShareDiagnostics:
@@ -89,59 +80,41 @@ def launch_application(
     share: bool = True,
     height: int = 900,
     colab: bool | None = None,
-    max_share_attempts: int = 2,
-    retry_delay_seconds: float = 2.0,
 ) -> LaunchInfo:
-    """Use native Gradio sharing first and Colab's proxy only as a fallback.
+    """Launch with Gradio's native notebook and sharing behavior.
 
     Gradio owns broker discovery, ``frpc`` acquisition, certificate handling, and
-    public URL creation. This wrapper deliberately performs no API preflight or
-    public-URL health gate. A failed native attempt is retried after closing its
-    local server; the last healthy local server is then presented through Colab.
+    public URL creation. It also owns Colab's inline kernel proxy when sharing is
+    unavailable. This wrapper only closes a stale server and records diagnostics;
+    it does not preflight, retry, health-gate, or manually embed either URL.
     """
     colab = in_colab() if colab is None else colab
-    attempts = max(1, int(max_share_attempts)) if share else 0
     diagnostics = share_diagnostics(colab=colab)
-    local_url = ""
-    share_url = None
-
-    for attempt in range(1, attempts + 1 if share else 2):
-        close_application(demo)
-        _, local_url, share_url = demo.launch(
-            share=share,
-            inline=False,
-            debug=False,
-            prevent_thread_lock=True,
-            show_error=False,
-        )
-        if share_url or not share or attempt == attempts:
-            break
-        time.sleep(max(0.0, retry_delay_seconds))
-
-    if colab:
-        if share_url:
-            from IPython.display import IFrame, display
-
-            display(IFrame(share_url, width="100%", height=height))
-            presentation = "gradio_share"
-        else:
-            from google.colab import output
-
-            output.serve_kernel_port_as_iframe(
-                _port_from_url(local_url), height=height
-            )
-            presentation = "colab_kernel_proxy"
-    else:
-        presentation = "share_url" if share_url else "local_url"
+    close_application(demo)
+    _, local_url, share_url = demo.launch(
+        share=share,
+        inline=colab,
+        debug=False,
+        prevent_thread_lock=False,
+        show_error=False,
+        height=height,
+    )
+    presentation = (
+        "gradio_share"
+        if share_url
+        else "gradio_colab_inline"
+        if colab
+        else "local_url"
+    )
 
     failure = None
     if share and not share_url:
-        failure = f"Gradio returned no public URL after {attempts} native attempt(s)"
+        failure = "Gradio returned no public URL; native Colab inline access remains active"
     return LaunchInfo(
         local_url=local_url,
         share_url=share_url,
         presentation=presentation,
-        share_attempts=attempts,
+        share_attempts=1 if share else 0,
         share_failure=failure,
         diagnostics=diagnostics,
     )
