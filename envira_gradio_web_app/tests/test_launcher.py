@@ -58,7 +58,33 @@ def test_colab_falls_back_to_kernel_proxy_when_share_tunnel_fails(monkeypatch):
     monkeypatch.setitem(sys.modules, "google", google)
     monkeypatch.setitem(sys.modules, "google.colab", colab)
 
-    info = launch_application(Demo(share_url=None), colab=True, height=720)
+    info = launch_application(
+        Demo(share_url=None), colab=True, height=720, share_probe=lambda: True
+    )
 
     assert info.presentation == "colab_kernel_proxy"
     assert calls == [(7867, 720)]
+    assert info.share_failure == "Gradio tunnel creation failed after API preflight"
+
+
+def test_colab_skips_share_attempt_when_tunnel_api_is_unreachable(monkeypatch):
+    calls = []
+    google = ModuleType("google")
+    colab = ModuleType("google.colab")
+    colab.output = SimpleNamespace(
+        serve_kernel_port_as_iframe=lambda port, height: calls.append((port, height))
+    )
+    google.colab = colab
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.colab", colab)
+    demo = Demo()
+
+    info = launch_application(
+        demo, colab=True, share=True, share_probe=lambda: False
+    )
+
+    assert demo.launch_kwargs["share"] is False
+    assert info.share_attempted is False
+    assert info.share_failure == "Gradio tunnel API is unreachable from this runtime"
+    assert info.presentation == "colab_kernel_proxy"
+    assert calls == [(7867, 900)]

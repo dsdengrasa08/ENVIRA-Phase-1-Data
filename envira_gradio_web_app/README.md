@@ -81,3 +81,11 @@ If the console says `Could not create share link`, layout processing has not fai
 the external Gradio tunnel service is unreachable. The launcher automatically uses
 the Colab kernel proxy instead. A Colab runtime restart/disconnect still terminates
 the server and clears in-memory models, while completed Drive outputs remain.
+
+Creating a Gradio share URL requires two separate outbound connections: an HTTPS
+request to `https://api.gradio.app/v3/tunnel-request` to obtain broker details, then
+a tunnel connection to the returned host and port. Colab, a corporate/network proxy,
+an ad blocker, regional filtering, or a Gradio service incident can block either
+step. The launcher preflights the broker API; when it is unreachable, it skips the
+doomed public-tunnel attempt, reports the reason, and uses the authenticated Colab
+proxy without changing PDF processing or Google Drive persistence.
