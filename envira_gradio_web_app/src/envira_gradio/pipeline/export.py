@@ -35,6 +35,11 @@ def _write_text(path, value, mode=0o600):
     secure_file(path, mode)
 
 
+def _manifest_path(document_dir, path):
+    """Return a validated POSIX path relative to the run artifact root."""
+    return path.resolve().relative_to(document_dir.resolve()).as_posix()
+
+
 def export_pipeline_result(run):
     paths = run.document.artifacts
     export_started = datetime.now(timezone.utc)
@@ -187,7 +192,7 @@ def export_pipeline_result(run):
         ),
         "files": [
             {
-                "path": path.name,
+                "path": _manifest_path(paths.document_dir, path),
                 "bytes": path.stat().st_size,
                 "sha256": sha256_file(path),
                 "sensitivity": _artifact_sensitivity(path),

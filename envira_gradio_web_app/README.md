@@ -45,3 +45,22 @@ create_app(runtime).queue().launch()
 
 The processing service serializes model work because the compatibility core is not
 reentrant. A timestamp plus random run ID prevents repeat-upload collisions.
+
+## Runtime warnings and failure diagnostics
+
+Docling may emit Transformers warnings while it loads its bundled layout, formula,
+or vision-language models. Messages about `torch_dtype`, token IDs, tied weights,
+or generation arguments originate in the installed Docling/Transformers model
+stack. They are warnings rather than pipeline failures and are intentionally not
+hidden, because hiding all third-party warnings could conceal a future compatibility
+problem. Keep the tested dependency ranges current when upgrading Docling.
+
+The application uses the supported `pymupdf` import name and does not use the
+deprecated `fitz` compatibility import. If a `fitz` deprecation warning remains,
+it originates in an installed dependency and should be addressed by upgrading that
+dependency rather than suppressing warnings globally.
+
+The Gradio interface deliberately shows a generic error so internal paths and
+processing details are not exposed to web users. The complete exception is logged
+to the Colab/server console and, after a run directory has been created, recorded
+in the private `run_failure.json` file in that run's persistent output directory.

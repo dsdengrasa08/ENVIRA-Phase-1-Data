@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
+
+LOGGER = logging.getLogger(__name__)
+
 
 def build_interface(service, max_concurrency: int = 1):
     import gradio as gr
@@ -12,6 +17,7 @@ def build_interface(service, max_concurrency: int = 1):
         except ValueError as exc:
             raise gr.Error(str(exc)) from None
         except Exception:
+            LOGGER.exception("ENVIRA PDF processing failed")
             raise gr.Error("PDF processing failed. Check the persistent run records for details.") from None
 
     with gr.Blocks(title="ENVIRA PDF Layout Detection") as demo:

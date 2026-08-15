@@ -302,7 +302,9 @@ def _write_failure(target: Path, context: Any, exc: Exception, status: str, conf
         "attempt": context.attempt,
         "parent_run_id": context.parent_run_id,
         "exception_type": type(exc).__name__,
-        "message": "pipeline execution failed" if status == "failed" else str(exc),
+        # This file is a private persistent diagnostic, not a Gradio output. Keep
+        # the sanitized exception detail here so a generic UI error is actionable.
+        "message": str(exc),
     }
     if config.operational.retain_private_traceback:
         payload["private_traceback"] = traceback.format_exc()

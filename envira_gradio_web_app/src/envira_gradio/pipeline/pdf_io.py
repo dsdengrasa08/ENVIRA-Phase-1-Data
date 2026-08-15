@@ -21,7 +21,7 @@ class PageSource:
         }
 
     def __enter__(self) -> "PageSource":
-        import fitz
+        import pymupdf as fitz
 
         if self._document is None:
             self._document = fitz.open(self.pdf_path)
@@ -42,7 +42,7 @@ class PageSource:
         return self._document[page_number - 1]
 
     def render_page(self, page_number: int):
-        import fitz
+        import pymupdf as fitz
 
         scale = self.render_dpi / 72.0
         pixmap = self.page(page_number).get_pixmap(
@@ -55,7 +55,7 @@ class PageSource:
         return self.page(page_number).get_text("words", clip=clip)
 
     def materialize_page_pdf(self, page_number: int, destination: str | Path) -> Path:
-        import fitz
+        import pymupdf as fitz
 
         destination = Path(destination)
         one_page = fitz.open()

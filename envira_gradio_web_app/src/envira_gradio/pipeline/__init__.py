@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("envira-pdf-layout")
+    __version__ = version("envira-gradio-web-app")
 except PackageNotFoundError:  # source checkout before installation
     from ._version import __version__
 
