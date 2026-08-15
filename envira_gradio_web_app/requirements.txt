@@ -1,5 +1,5 @@
 # Standalone Colab/runtime dependencies. This file has no reference-package dependency.
-gradio>=5,<7
+gradio==6.24.0
 docling>=2,<3
 PyMuPDF>=1.23,<2
 opencv-python-headless>=4.8,<5

@@ -1,29 +1,41 @@
-from types import SimpleNamespace
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import sys
 
-from envira_gradio.launcher import (
-    _port_from_url,
-    close_application,
-    launch_application,
-)
+from envira_gradio import launcher
+from envira_gradio.launcher import _port_from_url, close_application, launch_application
 
 
 class Demo:
-    def __init__(self, *, running=False, share_url=None):
+    def __init__(self, share_urls=(), *, running=False):
         self.is_running = running
-        self.share_url = share_url
+        self.share_urls = iter(share_urls)
         self.closed = 0
-        self.launch_kwargs = None
+        self.launch_calls = []
 
     def close(self):
         self.closed += 1
         self.is_running = False
 
     def launch(self, **kwargs):
-        self.launch_kwargs = kwargs
+        self.launch_calls.append(kwargs)
         self.is_running = True
-        return SimpleNamespace(), "http://127.0.0.1:7867", self.share_url
+        share_url = next(self.share_urls, None) if kwargs["share"] else None
+        return SimpleNamespace(), "http://127.0.0.1:7867", share_url
+
+
+def diagnostics():
+    return launcher.ShareDiagnostics("test", False, "/frpc", False, False, True, False)
+
+
+def install_colab(monkeypatch, calls):
+    google = ModuleType("google")
+    colab = ModuleType("google.colab")
+    colab.output = SimpleNamespace(
+        serve_kernel_port_as_iframe=lambda port, height: calls.append((port, height))
+    )
+    google.colab = colab
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.colab", colab)
 
 
 def test_port_is_derived_from_gradio_local_url():
@@ -36,55 +48,50 @@ def test_close_stops_server_without_owning_runtime():
     assert demo.closed == 1
 
 
-def test_relaunch_closes_existing_server_and_does_not_block():
-    demo = Demo(running=True)
-    info = launch_application(demo, colab=False)
-    assert demo.closed == 1
-    assert demo.launch_kwargs["inline"] is False
-    assert demo.launch_kwargs["debug"] is False
-    assert demo.launch_kwargs["prevent_thread_lock"] is True
-    assert info.local_url == "http://127.0.0.1:7867"
-    assert info.presentation == "local_url"
-
-
-def test_colab_falls_back_to_kernel_proxy_when_share_tunnel_fails(monkeypatch):
-    calls = []
-    google = ModuleType("google")
-    colab = ModuleType("google.colab")
-    colab.output = SimpleNamespace(
-        serve_kernel_port_as_iframe=lambda port, height: calls.append((port, height))
-    )
-    google.colab = colab
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.colab", colab)
+def test_native_share_is_not_gated_and_retries_once(monkeypatch):
+    monkeypatch.setattr(launcher, "share_diagnostics", lambda **_: diagnostics())
+    demo = Demo([None, "https://public.gradio.live"], running=True)
 
     info = launch_application(
-        Demo(share_url=None), colab=True, height=720, share_probe=lambda: True
+        demo, colab=False, max_share_attempts=2, retry_delay_seconds=0
     )
 
+    assert len(demo.launch_calls) == 2
+    assert all(call["share"] is True for call in demo.launch_calls)
+    assert all(call["inline"] is False for call in demo.launch_calls)
+    assert all(call["debug"] is False for call in demo.launch_calls)
+    assert demo.closed == 2
+    assert info.share_url == "https://public.gradio.live"
+    assert info.presentation == "share_url"
+    assert info.share_failure is None
+
+
+def test_colab_proxy_is_used_only_after_native_retries_fail(monkeypatch):
+    calls = []
+    install_colab(monkeypatch, calls)
+    monkeypatch.setattr(launcher, "share_diagnostics", lambda **_: diagnostics())
+    demo = Demo([None, None])
+
+    info = launch_application(
+        demo,
+        colab=True,
+        height=720,
+        max_share_attempts=2,
+        retry_delay_seconds=0,
+    )
+
+    assert len(demo.launch_calls) == 2
     assert info.presentation == "colab_kernel_proxy"
+    assert info.share_attempts == 2
+    assert info.share_failure == "Gradio returned no public URL after 2 native attempt(s)"
     assert calls == [(7867, 720)]
-    assert info.share_failure == "Gradio tunnel creation failed after API preflight"
 
 
-def test_colab_skips_share_attempt_when_tunnel_api_is_unreachable(monkeypatch):
-    calls = []
-    google = ModuleType("google")
-    colab = ModuleType("google.colab")
-    colab.output = SimpleNamespace(
-        serve_kernel_port_as_iframe=lambda port, height: calls.append((port, height))
-    )
-    google.colab = colab
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.colab", colab)
+def test_share_false_starts_once_without_reporting_failure(monkeypatch):
+    monkeypatch.setattr(launcher, "share_diagnostics", lambda **_: diagnostics())
     demo = Demo()
-
-    info = launch_application(
-        demo, colab=True, share=True, share_probe=lambda: False
-    )
-
-    assert demo.launch_kwargs["share"] is False
-    assert info.share_attempted is False
-    assert info.share_failure == "Gradio tunnel API is unreachable from this runtime"
-    assert info.presentation == "colab_kernel_proxy"
-    assert calls == [(7867, 900)]
+    info = launch_application(demo, share=False, colab=False)
+    assert len(demo.launch_calls) == 1
+    assert demo.launch_calls[0]["share"] is False
+    assert info.share_attempts == 0
+    assert info.share_failure is None

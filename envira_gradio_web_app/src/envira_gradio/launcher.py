@@ -4,12 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib.util
-import json
-from urllib.request import urlopen
+import os
+from pathlib import Path
+import time
 from urllib.parse import urlparse
 
 
-GRADIO_TUNNEL_API = "https://api.gradio.app/v3/tunnel-request"
+@dataclass(frozen=True)
+class ShareDiagnostics:
+    """Non-secret facts useful when Gradio's native tunnel cannot start."""
+
+    gradio_version: str
+    in_colab: bool
+    frpc_path: str
+    frpc_exists: bool
+    frpc_executable: bool
+    certificate_directory_writable: bool
+    outbound_proxy_configured: bool
 
 
 @dataclass(frozen=True)
@@ -19,8 +30,9 @@ class LaunchInfo:
     local_url: str
     share_url: str | None
     presentation: str
-    share_attempted: bool
+    share_attempts: int
     share_failure: str | None = None
+    diagnostics: ShareDiagnostics | None = None
 
 
 def in_colab() -> bool:
@@ -34,15 +46,35 @@ def _port_from_url(url: str) -> int:
     return parsed.port
 
 
-def gradio_share_api_available(timeout: float = 5.0) -> bool:
-    """Return whether Gradio's public tunnel broker supplies valid connection data."""
+def share_diagnostics(*, colab: bool | None = None) -> ShareDiagnostics:
+    """Inspect local tunnel prerequisites without gating Gradio's native attempt."""
+    import gradio
+    from gradio.tunneling import BINARY_PATH, CERTIFICATE_PATH
+
+    binary = Path(BINARY_PATH)
+    certificate_parent = Path(CERTIFICATE_PATH).resolve().parent
     try:
-        with urlopen(GRADIO_TUNNEL_API, timeout=timeout) as response:
-            payload = json.load(response)
-        server = payload[0]
-        return bool(server.get("host") and server.get("port") and server.get("root_ca"))
-    except (OSError, ValueError, TypeError, KeyError, IndexError):
-        return False
+        certificate_parent.mkdir(parents=True, exist_ok=True)
+        certificate_writable = os.access(certificate_parent, os.W_OK)
+    except OSError:
+        certificate_writable = False
+    proxy_names = (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+    )
+    return ShareDiagnostics(
+        gradio_version=gradio.__version__,
+        in_colab=in_colab() if colab is None else colab,
+        frpc_path=str(binary),
+        frpc_exists=binary.is_file(),
+        frpc_executable=binary.is_file() and os.access(binary, os.X_OK),
+        certificate_directory_writable=certificate_writable,
+        outbound_proxy_configured=any(os.getenv(name) for name in proxy_names),
+    )
 
 
 def close_application(demo) -> None:
@@ -57,34 +89,35 @@ def launch_application(
     share: bool = True,
     height: int = 900,
     colab: bool | None = None,
-    share_probe=None,
+    max_share_attempts: int = 2,
+    retry_delay_seconds: float = 2.0,
 ) -> LaunchInfo:
-    """Launch once and present a usable URL, even if Gradio sharing is unavailable.
+    """Use native Gradio sharing first and Colab's proxy only as a fallback.
 
-    Colab cannot load a kernel-local ``127.0.0.1`` URL directly in the browser. We
-    therefore disable Gradio's automatic inline iframe, prefer its public share
-    tunnel, and fall back to Colab's authenticated kernel-port proxy when the
-    tunnel service is unavailable.
+    Gradio owns broker discovery, ``frpc`` acquisition, certificate handling, and
+    public URL creation. This wrapper deliberately performs no API preflight or
+    public-URL health gate. A failed native attempt is retried after closing its
+    local server; the last healthy local server is then presented through Colab.
     """
-    close_application(demo)
     colab = in_colab() if colab is None else colab
-    share_attempted = share
-    share_failure = None
-    if colab and share:
-        probe = share_probe or gradio_share_api_available
-        if not probe():
-            # Avoid Gradio's doomed tunnel attempt and its misleading inline
-            # localhost frame. The authenticated Colab proxy is sufficient.
-            share = False
-            share_attempted = False
-            share_failure = "Gradio tunnel API is unreachable from this runtime"
-    _, local_url, share_url = demo.launch(
-        share=share,
-        inline=False,
-        debug=False,
-        prevent_thread_lock=True,
-        show_error=False,
-    )
+    attempts = max(1, int(max_share_attempts)) if share else 0
+    diagnostics = share_diagnostics(colab=colab)
+    local_url = ""
+    share_url = None
+
+    for attempt in range(1, attempts + 1 if share else 2):
+        close_application(demo)
+        _, local_url, share_url = demo.launch(
+            share=share,
+            inline=False,
+            debug=False,
+            prevent_thread_lock=True,
+            show_error=False,
+        )
+        if share_url or not share or attempt == attempts:
+            break
+        time.sleep(max(0.0, retry_delay_seconds))
+
     if colab:
         if share_url:
             from IPython.display import IFrame, display
@@ -98,19 +131,27 @@ def launch_application(
                 _port_from_url(local_url), height=height
             )
             presentation = "colab_kernel_proxy"
-            if share_attempted and share_failure is None:
-                share_failure = "Gradio tunnel creation failed after API preflight"
     else:
         presentation = "share_url" if share_url else "local_url"
+
+    failure = None
+    if share and not share_url:
+        failure = f"Gradio returned no public URL after {attempts} native attempt(s)"
     return LaunchInfo(
-        local_url, share_url, presentation, share_attempted, share_failure
+        local_url=local_url,
+        share_url=share_url,
+        presentation=presentation,
+        share_attempts=attempts,
+        share_failure=failure,
+        diagnostics=diagnostics,
     )
 
 
 __all__ = [
     "LaunchInfo",
+    "ShareDiagnostics",
     "close_application",
-    "gradio_share_api_available",
     "in_colab",
     "launch_application",
+    "share_diagnostics",
 ]
