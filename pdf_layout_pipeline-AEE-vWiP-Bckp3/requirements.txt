@@ -1,0 +1,13 @@
+# Compatibility dependency list for notebook and legacy ``pip -r`` callers.
+# Canonical project metadata and optional dependency groups live in pyproject.toml.
+# Do not put ``.[test]`` here: local project references are resolved relative to
+# the caller's working directory, not relative to this requirements file.
+docling>=2,<3
+PyMuPDF>=1.23,<2
+opencv-python-headless>=4.8,<5
+pandas>=2,<3
+matplotlib>=3.7,<4
+tqdm>=4.66,<5
+numpy>=1.26,<3
+PyYAML>=6,<7
+pytest>=8,<9
