@@ -14,7 +14,7 @@ def test_launcher_is_lightweight_and_independent():
     assert "sys.path.insert(0, standalone_src)" in source
     assert 'find_spec("envira_layout_web")' in source
     assert "share=True" in source
-    assert "inline=False" in source
+    assert "inline=True" in source
     assert "debug=IN_COLAB" in source
     assert "launch_notebook_app" not in source
     assert "proxyPort" not in source

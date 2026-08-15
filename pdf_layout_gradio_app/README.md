@@ -14,16 +14,18 @@ This directory contains its own pipeline implementation, configuration, schemas,
 
 The notebook is deliberately a launcher. Core processing is implemented in the Python modules under `src/`.
 The installation cell uses the active notebook kernel's Python executable and explicitly registers the standalone `src/` directory, so the following import cells work without a kernel restart.
-The launch cell requests Gradio's standard public share link and does not present
-Colab's kernel-local `localhost` address as the application entry point. Gradio
-manages the public URL; the application does not select a port or construct a
-Colab proxy URL. In Colab, `debug=True` keeps request errors visible in the cell
-output; stop the cell when finished.
+The launch cell requests Gradio's standard public share link and enables Gradio's
+supported inline notebook display. If the public share service is unavailable,
+Gradio can render its own Colab-managed iframe instead of leaving the cell with no
+application. The application does not select a port or construct a proxy URL. In
+Colab, `debug=True` keeps request errors visible in the cell output; stop the cell
+when finished.
 
-Creating the public URL depends on Gradio's share service. If Gradio reports that
-it could not create a share link, check the runtime's internet access and Gradio's
-service status, then rerun the launch cell. A share URL expires when its Gradio server is stopped; rerunning the setup and launch cells creates a new server and URL. The setup cell closes an earlier notebook server before replacing it. The application intentionally does not
-fall back to a manually generated Colab proxy URL.
+A public URL still depends on Gradio's share service. If that service is unavailable,
+use the inline application or the link rendered with it. A share URL expires when
+its Gradio server is stopped; rerunning the setup and launch cells creates a new
+server and display. The setup cell closes an earlier notebook server before replacing
+it. No application-owned proxy fallback is used.
 
 ## Persistent output
 
