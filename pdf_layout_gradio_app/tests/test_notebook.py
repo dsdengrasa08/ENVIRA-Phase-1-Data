@@ -17,6 +17,7 @@ def test_launcher_is_lightweight_and_independent():
     assert "debug=IN_COLAB" in source
     assert "launch_notebook_app" not in source
     assert "proxyPort" not in source
+    assert "github_pat_" not in source
     assert "server_port" not in source
     assert "run_layout_pipeline" not in source
     assert "pdf_layout_pipeline-AEE-vWiP" not in source
