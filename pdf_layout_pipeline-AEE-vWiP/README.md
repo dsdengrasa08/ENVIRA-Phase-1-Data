@@ -1,5 +1,9 @@
 # ENVIRA modular PDF layout pipeline
 
+> Repository maintainers: see the repository-wide
+> [maintainability review](../MAINTAINABILITY_REVIEW.md) for prioritized findings,
+> an incremental 90-day plan, and proposed quality gates.
+
 This directory is the maintained, self-contained PDF layout pipeline. The workflow
 preserves visible, stage-by-stage inspection while the complete active processing
 implementation and its tests live inside this directory. No file outside this
