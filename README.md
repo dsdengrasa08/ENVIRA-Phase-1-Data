@@ -10,9 +10,11 @@ ENVIRA is an auditable research-software pipeline for extracting semantic layout
 
 ### Model provenance and planned release
 
-The fine-tuned model used in this repository was developed for the **EMNLP
-Workshop submission**. The **EACL 2027 System Demonstrations submission** uses
-that same fine-tuned model as part of its demonstrated system.
+The fine-tuned model used in this repository was developed and evaluated for the
+work described in [*Reconstructing Latent Borders in Borderless and Partially
+Ruled Tables*](https://openreview.net/forum?noteId=YgaTweyGGs), submitted to an
+**EMNLP Workshop**. The **EACL 2027 System Demonstrations submission** uses that
+same fine-tuned model as part of its demonstrated system.
 
 The fine-tuned model is not yet available as a stable public dependency. We plan
 to release access to it in a future API and/or reusable software library; the
