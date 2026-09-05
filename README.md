@@ -2,6 +2,29 @@
 
 ENVIRA is an auditable research-software pipeline for extracting semantic layout regions from PDF documents. This repository contains one canonical Python library and a Gradio application that consumes it.
 
+## Project status
+
+> **Research software under active development.** This repository is not yet a
+> stable production release; interfaces, configuration, and generated artifacts may
+> change as the system is evaluated and refined.
+
+### Model provenance and planned release
+
+The fine-tuned model used in this repository was developed for the **EMNLP
+Workshop submission**. The **EACL 2027 System Demonstrations submission** uses
+that same fine-tuned model as part of its demonstrated system.
+
+The fine-tuned model is not yet available as a stable public dependency. We plan
+to release access to it in a future API and/or reusable software library; the
+release format, interface, licensing terms, and availability will be documented
+when they are finalized. Until then, this repository should be treated as the
+research implementation rather than as a public model service.
+
+These statements describe submissions and do not imply acceptance or endorsement
+by either venue. For reproducibility, results reported in the submissions should
+be associated with the exact Git commit, configuration, dependency constraints,
+and model manifest used for the corresponding experiment.
+
 ## Components
 
 | Component | Purpose |
