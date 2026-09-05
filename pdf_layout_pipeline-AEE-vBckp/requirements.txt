@@ -1,9 +1,0 @@
-docling
-pymupdf
-opencv-python-headless
-pandas
-matplotlib
-tqdm
-numpy
-pyyaml
-pytest
