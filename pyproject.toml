@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["packages/envira_pdf_layout/src/envira_pdf_layout/preserved_core.py"]
+
+[tool.ruff.lint]
+select = ["F"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["preserved_core.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/envira_pdf_layout/tests", "apps/envira_gradio/tests"]
+markers = [
+  "unit: fast deterministic unit checks",
+  "integration: package integration checks",
+  "regression: versioned semantic regression contracts",
+  "performance: deterministic work-count contracts",
+  "ocr: checks requiring OCR support",
+  "model: checks requiring model artifacts",
+]
