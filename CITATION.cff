@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: ENVIRA PDF Layout
+message: "If you use this software, please cite the archived software release and associated publication."
+type: software
+authors:
+  - family-names: "ENVIRA contributors"
+version: 0.1.8
+date-released: 2026-09-05
+license: BSD-3-Clause
