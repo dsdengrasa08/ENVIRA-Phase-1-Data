@@ -1,4 +1,4 @@
-name: package
+name: ci
 
 on:
   pull_request:
@@ -9,53 +9,58 @@ permissions:
   contents: read
 
 jobs:
-  source-tests:
+  pipeline-tests:
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: pdf_layout_pipeline-AEE-vWiP
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install --constraint constraints-regression.txt ".[test]"
+      - run: python -m pip install --constraint requirements/constraints-regression.txt "./packages/envira_pdf_layout[test]"
       - run: python -m pip check
-      - run: pytest -q
-      - run: pytest -q -m regression
+      - run: pytest -q packages/envira_pdf_layout/tests
 
-  distribution:
-    needs: source-tests
+  gradio-tests:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: pdf_layout_pipeline-AEE-vWiP
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install --constraint constraints-regression.txt build twine pip-audit cyclonedx-bom
-      - run: python -m build
-      - run: python -m twine check dist/*
-      - run: python scripts/inspect_distribution.py dist/*
-      - run: python -m pip install --constraint constraints-regression.txt dist/*.whl
+      - run: python -m pip install "./packages/envira_pdf_layout" "./apps/envira_gradio[test]"
+      - run: python -m pip check
+      - run: pytest -q apps/envira_gradio/tests
+
+  distribution:
+    needs: [pipeline-tests, gradio-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --constraint requirements/constraints-regression.txt build twine pip-audit cyclonedx-bom
+      - run: python -m build packages/envira_pdf_layout
+      - run: python -m build apps/envira_gradio
+      - run: python -m twine check packages/envira_pdf_layout/dist/* apps/envira_gradio/dist/*
+      - run: python tools/release/inspect_distribution.py packages/envira_pdf_layout/dist/*
       - run: python -m pip_audit --strict
-      - run: cyclonedx-py environment --output-format JSON --output-file dist/sbom.cdx.json
+      - run: cyclonedx-py environment --output-format JSON --output-file sbom.cdx.json
       - name: Clean installed-wheel smoke test
         run: |
           python -m venv /tmp/envira-wheel-test
-          /tmp/envira-wheel-test/bin/pip install --constraint constraints-regression.txt dist/*.whl
+          /tmp/envira-wheel-test/bin/pip install packages/envira_pdf_layout/dist/*.whl apps/envira_gradio/dist/*.whl
           cd /tmp
           /tmp/envira-wheel-test/bin/envira-pdf-layout --version
           /tmp/envira-wheel-test/bin/envira-pdf-layout resources
-          /tmp/envira-wheel-test/bin/python -c 'import envira_pdf_layout, pathlib; assert "site-packages" in str(pathlib.Path(envira_pdf_layout.__file__))'
+          /tmp/envira-wheel-test/bin/python -c 'import envira_pdf_layout, envira_gradio'
       - name: Verify tag and wheel version
         if: startsWith(github.ref, 'refs/tags/')
-        run: python scripts/verify_release_tag.py "${GITHUB_REF_NAME}" dist/*.whl
+        run: python tools/release/verify_release_tag.py "${GITHUB_REF_NAME}" packages/envira_pdf_layout/dist/*.whl

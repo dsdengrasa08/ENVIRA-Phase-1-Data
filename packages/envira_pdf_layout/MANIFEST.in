@@ -1,0 +1,2 @@
+include README.md
+recursive-include src/envira_pdf_layout/resources *.yaml *.json
